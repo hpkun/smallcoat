@@ -1,0 +1,964 @@
+IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026                                                                               29
+
+
+
+
+       Cluster-Based Multi-Agent Task Scheduling for
+          Space–Air–Ground Integrated Networks
+    Zhiying Wang, Gang Sun , Senior Member, IEEE, Yuhui Wang , Hongfang Yu , Senior Member, IEEE,
+                                    and Dusit Niyato , Fellow, IEEE
+
+
+
+   Abstract—The       Space-Air-Ground      Integrated    Network                traffic requirements and ensuring ubiquitous coverage. In some
+(SAGIN) framework is a crucial foundation for future networks,                   isolated and elevated areas, such as oceans and mountains,
+where satellites and aerial nodes assist in computational task                   ground cellular or fiber networks suffer from inadequate or
+offloading. The low-altitude economy, leveraging the flexibility
+and multifunctionality of Unmanned Aerial Vehicles (UAVs)                        absent access due to topographical impediments [1]. After
+in SAGIN, holds significant potential for development in                         decades of advancement, the global space infrastructure has
+areas such as communication and sensing. However, effective                      attained a high level of maturity and dependability, establish-
+coordination is needed to streamline information exchange and                    ing a comprehensive space-based information system [2]. By
+enable efficient system resource allocation. In this paper, we                   utilizing the space, aerial, and ground segments with mod-
+propose a Clustering-based Multi-agent Deep Deterministic
+Policy Gradient (CMADDPG) algorithm to address the multi-                        ern information network technologies, the Space-Air-Ground
+UAV cooperative task scheduling challenges in SAGIN. The                         Integrated Network (SAGIN) has emerged as a potential
+CMADDPG algorithm leverages dynamic UAV clustering to                            solution to overcome the shortcomings of ground communi-
+partition UAVs into clusters, each managed by a Cluster Head                     cation systems [3]. By achieving device information fusion
+(CH) UAV, facilitating a distributed-centralized control approach.               and collaborative cooperation through Airborne Computing
+Within each cluster, UAVs delegate offloading decisions to
+the CH UAV, reducing intra-cluster communication costs and                       (AirComp), the low-altitude economy will provide critical sup-
+decision conflicts, thereby enhancing task scheduling efficiency.                port for applications such as network coverage, environmental
+Additionally, by employing a multi-agent reinforcement learning                  monitoring, disaster relief, and logistics delivery [4].
+framework, the algorithm leverages the extensive coverage                           SAGIN is a framework that integrates space, air, and ground
+of satellites to achieve centralized training and distributed                    networks, overcoming the limitations of standalone terrestrial
+execution of multi-agent tasks, while maximizing overall system
+profit through optimized task offloading decision-making.                        systems to provide global coverage. The aerial-based network
+Simulation results reveal that the CMADDPG algorithm                             component, which includes High-Altitude Platforms (HAPs)
+effectively optimizes resource allocation, minimizes queue delays,               and Unmanned Aerial Vehicles (UAVs), offers flexible and
+maintains balanced load distribution, and surpasses existing                     efficient support to ground networks [5]. This aerial layer
+methods by achieving at least a 25% improvement in system                        can dynamically allocate resources based on user demand and
+profit, showcasing its robustness and adaptability across diverse
+scenarios.                                                                       adjust its coverage area as needed, making it ideal for disaster
+                                                                                 response, remote sensing, and rural connectivity. The space-
+   Index Terms—Space-air-ground integrated networks, task                        based network layer, consisting of multiple satellites, forms
+schedule, reinforcement learning, clustering algorithm, load bal-
+ancing.                                                                          a multi-link, multi-tiered data transmission, and information
+                                                                                 processing system [6]. This integrated network structure sup-
+                                                                                 ports applications such as real-time data collection for climate
+                          I. I NTRODUCTION                                       monitoring, maritime navigation, and seamless broadband
+    HE DEVELOPMENT of emerging technologies such
+T   as the Internet of Things (IoT), cloud computing,
+and artificial intelligence has led to a surge in wireless
+                                                                                 service for remote communities.
+                                                                                    With the rapid development of devices like smartphones
+                                                                                 and tablets, a variety of computation-intensive and latency-
+communication services. Nevertheless, traditional terrestrial                    sensitive applications have emerged. Mobile devices, however,
+networks encounter difficulties in satisfying the escalating                     often have limited processing capabilities. To address this, task
+                                                                                 offloading has been proposed, allowing user devices to offload
+   Received 16 December 2024; revised 12 February 2025; accepted 16
+March 2025. Date of publication 21 March 2025; date of current version           computational tasks to nearby high-performance computing
+19 December 2025. This work was supported in part by the National Key            centers [7], [8]. This offloading not only reduces compu-
+Research and Development Program of China under Grant 2019YFB1802800.            tational delay but also conserves the energy consumption
+The associate editor coordinating the review of this article and approving it
+for publication was Q. J. Ye. (Corresponding author: Gang Sun.)                  of mobile devices. However, the complex network architec-
+   Zhiying Wang, Gang Sun, Yuhui Wang, and Hongfang Yu are with                  ture introduces numerous challenges for resource scheduling
+the School of Information and Communication Engineering, University of           and management. These include issues such as cooperative
+Electronic Science and Technology of China, Chengdu 611731, China (e-mail:
+zhiyingwang@std.uestc.edu.cn;        gangsun@uestc.edu.cn;     wyh410928@        control and collaborative data transmission in heterogeneous
+163.com; yuhf@uestc.edu.cn).                                                     networks, as well as mobility management in time-varying
+   Dusit Niyato is with the College of Computing and Data Science, Nanyang       networks [9], [10]. Thus, efficiently scheduling tasks has
+Technological University, Singapore 639798 (e-mail: dniyato@ntu.edu.sg).
+   Digital Object Identifier 10.1109/TCCN.2025.3553297                           become a focal point for researchers, who are actively
+                2332-7731 
+                          c 2025 IEEE. All rights reserved, including rights for text and data mining, and training of artificial intelligence
+                       and similar technologies. Personal use is permitted, but republication/redistribution requires IEEE permission.
+                                       See https://www.ieee.org/publications/rights/index.html for more information.
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+30                                                          IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026
+
+
+
+exploring methods to optimize resource allocation, improve                         The remainder of this paper is organized as follows.
+network responsiveness, and enhance the overall quality of                       Section II presents the related work. We describe the system
+service in mobile edge computing environments.                                   models and problem formulation in Section III. In Section IV,
+   There is a substantial body of research on task scheduling                    we give the details of our proposed algorithm. Section V
+in various SAGIN scenarios. The authors in [11] addressed                        presents the simulation results, followed by the conclusion in
+the task scheduling issue in latency-aware IoT networks and                      Section VI.
+proposed a non-preemptive priority queuing and cross-layer
+optimization scheme. In [12], the authors introduced a Medium                                             II. R ELATED W ORK
+Access Control (MAC) protocol for controlling massive IoT                           The rise of 5G networks has driven growth in computation-
+device access in a network consisting of a satellite, a high-                    heavy and latency-sensitive tasks. To meet future 6G demands,
+altitude platform (HAP), and multiple IoT device networks,                       a new SAGIN architecture has been introduced [15]. SAGIN
+providing differentiated services to IoT devices with varying                    primarily comprises three segments: space, air, and ground,
+Quality of Service (QoS) requirements. The authors in [13]                       which cooperate to achieve global communication cover-
+proposed an intelligent offloading decision algorithm for                        age and provide uninterrupted network services. However,
+resource competition scenarios based on Proportional Fairness-                   this integration also faces numerous challenges: i) real-time
+Aware Auction and Proximal Policy Optimization (PPO).                            responsiveness; ii) integration complexity; and iii) scalability.
+Finally, the authors in [14] formulated the online scheduling
+problem as an energy-constrained Markov Decision Process                         A. Real-Time Responsiveness
+(MDP) and proposed a deep risk-sensitive reinforcement
+learning algorithm.                                                                 Real-time responsiveness is a critical challenge in SAGIN
+   However, existing centralized control schemes typically                       networks, as it directly affects the quality of service for
+focus only on the strategy selection of individual decision-                     time-sensitive tasks, such as mission-critical UAV operations.
+makers, overlooking the complex impacts of information                           Efficient resource scheduling is essential to meet strict delay
+exchange and parameter sharing between them. At the same                         requirements in such environments. Due to the large number
+time, fully distributed schemes lack coordination and face                       of nodes and links in SAGIN, the network complexity sig-
+significant convergence challenges, making it difficult to                       nificantly exceeds that of conventional networks. Moreover,
+achieve optimal results for the overall system. To address                       the channel and computational resources within the network
+this issue, this paper proposes a Clustering-based Multi-Agent                   are limited, making efficient resource scheduling essential
+Deep Deterministic Policy Gradient (CMADDPG) method                              to maximize resource utilization and achieve better service
+in SAGIN, which adopts a cooperation mode of centralized                         performance. In [16], the authors proposed a service function
+training and distributed execution, effectively overcoming                       chain mapping method based on delay prediction, calculating
+these challenges. The main contributions of this paper are as                    the deployment delay for each path and selecting the one with
+follows:                                                                         the minimum delay for chain deployment, effectively improv-
+   • To reduce communication overhead among nodes in                             ing the Central Processing Unit (CPU) and link resource
+      large-scale UAV scenarios and adapt to dynamic topology                    utilization. Additionally, [17] analyzed the use of mathematical
+      changes, we propose a low-complexity K-Means-based                         optimization, game theory, and AI techniques (e.g., deep
+      dynamic UAV clustering algorithm (KMDUC), which                            learning and reinforcement learning) to minimize latency
+      includes a centralized clustering phase and a distributed                  and maximize network throughput and stability, contributing
+      cluster maintenance phase, thereby achieving a hybrid                      to the advancement of next-generation SAGIN networks.
+      control mode of distributed and centralized control.                       The authors [18] used Directed Acyclic Graph (DAG) and
+   • Next, we propose a cooperative offloading algorithm                         Reverse Breadth-First Search (RBFS) to solve the problem of
+      based on the multi-agent deep deterministic policy gradi-                  minimizing the actual finish time of dependent tasks in MEC-
+      ent, which employs a centralized training and distributed                  assisted vehicular networks. These studies provide insight into
+      execution framework. During the training phase, a cen-                     minimizing delay and maintaining real-time responsiveness.
+      tralized critic network deployed on the satellite performs
+      joint training. In the execution phase, each agent deployed                B. Integration Complexity
+      on a UAV only uses local observation information to                           Integration complexity arises from the need to combine dif-
+      make decisions through its distributed actor network,                      ferent network layers (space, air, and ground) and effectively
+      achieving both global optimization and locally efficient                   coordinate resources across them. Managing these diverse
+      decision-making for large-scale SAGIN.                                     components requires efficient algorithms that can handle vary-
+   • Numerical simulation experiments validate the effec-                        ing network topologies, dynamic UAV mobility, and device
+      tiveness of the proposed algorithm. The results show                       heterogeneity.
+      that the proposed algorithm demonstrates advantages in                        Many researchers have proposed traditional optimization
+      system profit, load balancing, and fairness, particularly                  algorithms to address resource scheduling challenges in
+      surpassing existing methods by achieving at least a 25%                    SAGIN scenarios. The authors in [19] utilized Successive
+      improvement in system profit, which comprehensively                        Convex Approximation (SCA) to solve a non-convex problem
+      considers task data size, computational complexity, and                    by iteratively optimizing user association, offloading decisions,
+      delay requirements.                                                        and UAV positioning, aiming to minimize the weighted energy
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+WANG et al.: CLUSTER-BASED MULTI-AGENT TASK SCHEDULING FOR SAGINS                                                                                           31
+
+
+                                                                                                              TABLE I
+consumption while satisfying maximum delay constraints.                                     E XPLANATION OF VARIABLES U SED IN T HIS PAPER
+The work in [20] introduced the Slice-Soft-SAGIN frame-
+work, which allocates slicing resources by leveraging wireless
+spectrum and computational resources to ensure each slice’s
+quality of service, achieving efficient resource allocation.
+These methods demonstrate different approaches to managing
+the complexity of integrating diverse network resources.
+   Further, in [21], the authors proposed both a centralized
+algorithm based on SCA and a distributed algorithm based
+on the Alternating Direction Method of Multipliers (ADMM),
+with both approaches validated for effectiveness. However, tra-
+ditional optimization algorithms often struggle with scalability
+in dynamic environments, especially in large-scale SAGIN
+systems, where multiple UAVs, satellites, and ground stations
+interact in real-time.
+
+
+C. Scalability
+   Scalability is a key challenge in large-scale SAGIN
+networks, where the number of UAVs and other nodes may
+increase significantly. To address this, many studies have
+turned to Deep Reinforcement Learning (DRL) methods for
+their ability to handle large, dynamic environments.
+   Single-agent DRL has been successfully applied to address
+the scalability challenge in SAGIN. In [22], the authors first
+established a SAGIN architecture based on Software-Defined
+Networking (SDN) and Network Function Virtualization
+(NFV) and designed a resource scheduling and computation
+offloading algorithm using Deep Q-Network (DQN). The
+Asynchronous Advantage Actor-Critic (A3C) algorithm was
+employed in [23] to reduce the action space and accelerate
+convergence in SAGIN-assisted vehicular networks, improving
+rewards and system efficiency.
+   For multi-agent systems, which are more suitable for                          these limitations, we propose a novel algorithm that combines
+large-scale scenarios, communication and collaboration among                     the advantages of both centralized and distributed approaches,
+agents are key to enhancing overall performance. In [24], the                    ensuring scalability, flexibility, and efficient coordination in
+authors designed a Multi-Agent DRL algorithm based on the                        dynamic SAGIN environments.
+Actor-Critic framework. This method enables multiple agents
+to coordinate their actions, improving reward outcomes by                                                 III. S YSTEM M ODEL
+evaluating actions at both the individual and group levels.
+In [25], the MADDPG algorithm was employed to address                               Table I provides a detailed explanation of the variables
+multi-objective optimization for throughput, delay, and slice                    utilized in the following sections of the paper.
+coverage by decomposing the problem into sub-problems.
+In [26], the traffic offloading problem in SAGIN was modeled                     A. The SAGIN Architecture
+as a Decentralized Partially Observable Markov Decision                             SAGIN consists of three layers: space-based, air-based, and
+Process (DEC-POMDP) and solved with the Differentiated                           ground-based networks. Ground stations offer high compu-
+Federated Soft Actor-Critic (DFSAC) algorithm, which                             tational power but have limited coverage due to their fixed,
+enhances system scalability and performance. Additionally,                       low-altitude positions. LEO satellites provide continuous cov-
+the authors proposed a Quantum Multi-Agent Reinforcement                         erage from higher altitudes but introduce longer propagation
+Learning (QMARL) approach to improve global access avail-                        delays in UAV-satellite links. Therefore, how to leverage the
+ability and energy efficiency in large-scale SAGIN by reducing                   distinct characteristics of UAVs, ground stations, and the LEO
+the action space dimensionality.                                                 satellite constellation, and implement effective task scheduling
+   While single-agent DRL methods are often constrained by                       strategies to allocate computational tasks appropriately to dif-
+centralized control, multi-agent systems improve scalability by                  ferent destination network components in the SAGIN, aiming
+allowing agents to act autonomously based on local obser-                        to maximize profits and task completion rates, becomes the
+vations. However, multi-agent systems face challenges such                       key focus of this paper.
+as communication overhead and coordination issues, which                            Figure 1 illustrates the task scheduling cooperation within
+can slow down convergence and reduce stability. To overcome                      the SAGIN. UAVs are represented by the set U = {Ui |
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+32                                                          IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026
+
+
+
+                                                                                 of tasks in the queue to achieve orderly and intelligent
+                                                                                 scheduling.
+
+                                                                                 B. Task Model
+                                                                                    We define a tuple Taskk = (φ, ρ, δ, G) to describe comput-
+                                                                                 ing task k. Here, φ represents the input data size in bits, and ρ
+                                                                                 indicates the computational workload in terms of CPU cycles
+                                                                                 per bit, i.e., the number of CPU cycles required to process
+                                                                                 one bit of data. Additionally, δ denotes the allowable delay for
+                                                                                 the task, with only those tasks completed within the deadline
+                                                                                 yielding revenue. The task profit function [28] is expressed as:
+                                                                                                           G = φ · ρ · e −λ·δ ,                            (1)
+                                                                                 which reflects the reward for successfully completing the task.
+                                                                                 The parameter λ adjusts the sensitivity to delay, with a higher
+                                                                                 λ emphasizing stricter delay requirements. The exponential
+                                                                                 factor e −λ·δ acts as a discount, reducing the task profit as the
+Fig. 1.   Task scheduling cooperation under SAGIN.
+                                                                                 tolerable delay increases. Thus, the task profit depends on the
+                                                                                 data size, computational load, and delay tolerance.
+
+                                                                                 C. Computing Model
+i = 1, 2, . . . , Nu }, where Ui represents UAV i, and Nu is
+the total number of UAVs. UAVs often belong to the same                             Given the limited computational capacity of UAVs, tasks
+service provider or collaborate across providers to optimize                     can be offloaded to satellites, BSs, or processed locally.
+the utilization of network computing resources during task                       We consider a satellite s, which is primarily responsible for
+offloading. By sharing information about factors such as                         providing coverage, task transmission, and computation. There
+distance, network load, and task requirements, UAVs can                          are NBS base stations, and the set of base stations is denoted
+coordinate their offloading decisions to balance the load across                 as B = {1, 2, . . . , NBS }. Therefore, the task can be processed
+multiple base stations (BSs). This cooperative approach helps                    at a destination device j ∈ J = {0 ∪ B ∪ s}, where j = 0
+to minimize task backlog and congestion at any single BS,                        means the task is processed locally, 1 ≤ j ≤ NBS means the
+reducing queuing delays and improving task completion rates.                     task is offloaded to BS, and j = s means the task is offloaded
+Additionally, this strategy ensures a more efficient use of                      to the satellite for computation.
+available computing resources, achieving better load balance                        The tuple (αk ,j , ηk ) represents the offloading decision for
+and enhancing overall system performance.                                        task k. αk ,j denotes the 0-1 offloading decision. When task
+   In our network scenario, we adopt a specific mobility                         k is offloaded to device j, αk ,j = 1; otherwise, αk ,j =
+model, denoted as M = (loc, θ, v ), where ground stations                        0. ηk indicates the computation priority of the task on the
+are stationary with fixed locations. The time duration of each                   target device. The second part of the tuple, ηk ∈ [0, 1],
+time slot is denoted as t and T is the set of all time slots.                    represents the relative weight assigned to the computation
+The UAV’s speed v remains constant for a time slot, and its                      priority of task k on the selected target device. This reflects
+direction changes randomly within a certain angle θ at each                      the computational order of task k, which prioritizes tasks
+time slot.                                                                       with tighter delay constraints or deadlines. This variable
+   In this paper, we adopt a discrete timeslot-based approach.                   allows for adaptive priority assignment, ensuring that delay-
+At each timeslot, the UAV’s position is denoted as loct . As the                 sensitive tasks can receive preferential treatment. Based on
+UAV moves and its position changes, the set of available target                  the computation priority, the target device processes the tasks
+network nodes Dt for task offloading also changes, which                         sequentially in accordance with the assigned computational
+includes the following devices: ground base stations, Low                        queue.
+Earth Orbit (LEO) satellite, and Local devices. During each                         In addition, to avoid conflicts or congestion caused by the
+timeslot, the UAV can choose multiple computational tasks                        simultaneous transmission of multiple tasks, we assume that
+to offload to appropriate ground stations or LEO satellites.                     new tasks cannot be forwarded until the offloading process of
+However, we adopt a 0-1 offloading strategy [27], meaning                        the preceding task is completed [29]. We define the computing
+that each task can only be offloaded to one target node for                      capacity of BS as fj and the computing capacity of the satellite
+computation.                                                                     as f0 , both measured in CPU cycles per second. The delay
+   After the UAV collects tasks from mobile terminals if these                   in offloading task k consists of two parts: queuing delay and
+tasks have not been processed or offloaded to a ground station                   computing delay. The computing delay for all tasks at the
+or LEO satellite, they are stored in the UAV’s task queue.                       offloading destination device j can be determined using the
+Subsequently, the UAV can process or offload the computa-                        following formula:
+tional tasks from the task queue to other nodes. Therefore,                                                           αk ,j · φk
+                                                                                                            dkc,j =              ,                         (2)
+the UAV needs to reasonably schedule the processing order                                                              ρk · fj
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+WANG et al.: CLUSTER-BASED MULTI-AGENT TASK SCHEDULING FOR SAGINS                                                                                           33
+
+
+
+where φk represents the total computational demand of task                       the shorter communication distance [13]. Therefore, τprop is
+k, measured in CPU cycles. ρk denotes the parallelization                        expressed as:
+efficiency coefficient of task k, with a range of 0 < ρk ≤ 1. It                                        
+                                                                                                          dk ,j
+reflects the task’s capability for parallel processing. The closer                              τprop =     c , if j = s                  (6)
+the value is to 1, the easier it is for the task to achieve efficient                                     0, otherwise.
+parallelism.                                                                        The total delay of the task includes processing delay and
+   The queuing delay of a computing task on the target device                    transmission delay.
+is determined by the cumulative computing delays of all
+preceding tasks in the execution order. However, as it is influ-                                         dktotal  tran    c
+                                                                                                            ,j = dk ,j + dk ,j                             (7)
+enced by other scheduling decisions, its exact mathematical
+expression cannot be defined.                                                    E. Problem Formulation
+                                                                                    In this paper, we aim to maximize the long-term profits of
+D. Communication Model                                                           the system in cooperative scenarios while satisfying the task
+   In this paper, we assume that BSs and LEO satellites operate                  delay constraint. Therefore, the task scheduling problem of
+on different frequency bands, significantly reducing commu-                      SAGIN is formulated as:
+nication interference between the two [30]. Task offloading                                           1 
+                                                                                         max lim                     αk ,j (t)Gk (t)       (8)
+is achieved via wireless communication, with factors such                                 α k ,j T →∞ T
+                                                                                                               t∈T j ∈J k ∈L
+as communication distance and rain attenuation impacting
+the quality of the wireless link. Assuming constant weather                                          
+                                                                                                     M
+                                                                                            s.t.            αk ,j = 1,   ∀k                                (9)
+conditions during the task offloading process, the channel gain
+                                                                                                     j =1
+of the communication link between the UAV and the LEO
+satellite or BS can be approximated as dependent on the UAV’s                                        dk ,j ≤ δk ,    ∀i , j , k                          (10)
+location. We employ a two-ray path loss model that accounts                                          αk ,j ∈ {0, 1},      ∀j , k                         (11)
+for both the direct path and the ground reflection path. The                                         N 
+                                                                                                      L
+path loss (PL) between the UAV and the target device [31] is                                                    αk ,j (t)φk γk ≤ Cj (t),       ∀j , t.   (12)
+expressed as:                                                                                        i=1 k =1
+                                           
+                        4πd0                   d                                    We seek to maximize the system’s long-term average profit.
+    PLij = 20 log10             + 10n log10         + Xσ , (3)                   The objective function is the limit of the average profit as the
+                        λwave                 d0
+                                                                                 time horizon tends to infinity. The average profit is calculated
+where, d represents the actual communication distance                            by summing the product of the offloading decision αk ,j (t)
+between the UAV and the target device, while d0 denotes                          and the task profit Gk (t) over all time steps t, offloading
+the reference distance. λwave indicates the wavelength of                        destinations device j, and task k.
+the electromagnetic wave, defined as λwave = cf , where                             The constraints of the problem are as follows: Equation (9)
+c is the speed of light, and f is the signal frequency. n                        indicates that each task can only be offloaded to one desti-
+is the path loss exponent, determined by the surrounding                         nation, meaning that, collectively, for each task k, the sum
+propagation environment. Xσ is a Gaussian random variable.                       of the offloading decisions to all destinations should equal 1;
+These parameters will depend on the specific characteristics                     Equation (10) ensures that the total delay for each task at each
+of the communication system in use. Consequently, the data                       offloading destination does not exceed its specified deadline;
+rate Rij (t) for the link between the UAV and the target device                  Equation (11) indicates that the offloading decision αk ,j is
+can be calculated as follows:                                                    binary, taking values 0 or 1, representing whether the task is
+                                                 
+                                  P T · GT · GR                                  offloaded to a specific destination; Equation (12) is a constraint
+            Rij = B · log2 1 +                      ,       (4)
+                                   PN · PLij (d )                                on the total offloading load for each offloading target j, where
+where, B represents the bandwidth, PT is the transmit power,                     φk is the input data size, γk is the computational workload, and
+GT is the transmit antenna gain, GR is the receive antenna                       Cj (t) is the computational capacity of the offloading target,
+gain, PN is the noise power, and PLij (d ) is the path loss                      ensuring that the computational resources of each offloading
+between the UAV and the satellite.                                               target device are not overloaded.
+   Let dktran                                                                       The optimization problem outlined in Equation (8) is an
+          ,j represent the transmission delay for offloading a                   integer nonlinear optimization problem, complicated by an
+task to destination j, which can be expressed as:
+                                                                                 unknown number of newly collected tasks in each epoch. The
+                                 αk ,j φk                                        evolving ergodic nature of the UAV’s location, along with the
+                     dktran
+                        ,j =              + τprop .                      (5)
+                                  Rij                                            task queue backlog and the interference arising from UAV
+   The propagation delay τprop depends on the value of j.                        offloading decisions, classifies the problem as NP-hard [32].
+When the communication link is between the UAV and a LEO
+satellite, i.e., j = 0, the propagation delay is calculated as                                         IV. A LGORITHM D ESIGN
+the distance between the two divided by the speed of light.                         This paper addresses the challenge of cooperative task
+However, when the communication link is between the UAV                          scheduling in an integrated space-air-ground network, with
+and a BS, i.e., j = 0, the propagation delay is ignored due to                  the goal of maximizing system profit, as formulated in
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+34                                                          IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026
+
+
+
+problem (8). A key challenge is designing a coordination                         information of the UAVs, the position-based K-Means algo-
+mechanism that minimizes both algorithmic complexity and                         rithm is used to divide the UAVs into cn clusters, each
+system overhead. While centralized control can maximize                          with a CH and several CMs. K-Means is chosen for its
+profit, it incurs high signaling costs, whereas fully distributed                scalability, simplicity, and control over cluster size, making it
+schemes suffer from a lack of coordination. To overcome                          particularly well-suited for large UAV networks. An important
+these challenges, we propose the CMADDPG algorithm.                              factor affecting the effectiveness of the clustering algorithm is
+This approach combines dynamic clustering and cooperative                        whether the optimal value of the number of clusters cn can
+offloading strategies to enable efficient task scheduling, coordi-               be determined. The number of clusters cn affects the size of
+nated control, and enhanced system profit within the network.                    the clusters and the number of decisions and transmissions in
+                                                                                 the network. If the size of the clusters is large, the number
+                                                                                 of transmissions required for information exchange from CM
+A. Dynamic UAV Clustering Algorithm                                              UAVs to CH UAV will be very high, thereby affecting network
+   The high-speed movement and dynamic nature of UAV                             performance. Conversely, if the scale of the clusters is too
+networks lead to frequent topology changes, increasing                           small, the number of clusters and CH UAVs will increase, and
+network management and resource scheduling costs [33]. UAV                       at this time, the number of decision-making agents increases,
+clustering is an effective method for improving performance                      making decision conflicts more likely to occur, affecting the
+in large-scale UAV networks by dividing the network into                         convergence performance of the network. Therefore, it is
+clusters, each with a Cluster Head (CH) for communication.                       necessary to first determine the optimal value of cn , which
+However, traditional clustering schemes often neglect UAV                        is the minimum number of clusters that makes the maximum
+mobility and relative positioning, failing to adapt to the                       value of the CH coverage probability reach a preset threshold.
+dynamic nature of self-organizing networks. Frequent cluster                        The CH coverage probability, that is, the probability that
+updates increase control overhead and delays. To address this,                   a UAV is covered by a CH, can be calculated based on the
+this paper proposes a KMDUC, which considers UAV mobility                        Euclidean distance between the position of the UAV and the
+while maintaining clustering stability.                                          position of the CH, as well as the communication radius of
+   The clustering algorithm divides the UAV network into                         the CH [34]. The closer the distance between the UAV and
+several clusters, each consisting of a CH and several Cluster                    the CH, the greater this probability, and the more likely the
+Members (CMs). In this scenario, the CH is responsible for                       UAV is to join the cluster of this CH. Specifically, it can
+communicating with other CHs or satellites and issuing task                      be modeled using the logistic function [35], which is smooth
+offloading decisions to CMs, while CMs are responsible for                       and continuous, aligning with the characteristics of real-world
+collecting computing tasks and communicating with the CH.                        communication systems. So the probability that UAV i is
+   In summary, the KMDUC algorithm consists of two stages:                       covered by CH l, denoted as Pil , is expressed as:
+the clustering stage and the cluster maintenance stage. In
+                                                                                                                       1
+the clustering stage, a preliminary clustering scheme is deter-                                         Pil =                    ,                       (13)
+mined using a centralized method based on UAV location                                                          1 + e −ζ(dil −R)
+information, with satellites collecting data over a period Tcls ,                where, dil is the Euclidean distance between UAV i and CH l,
+calculating clustering results, and broadcasting them to the                     R is the communication radius of the UAV, and ζ is a tuning
+UAVs. During the cluster maintenance stage, the UAVs’                            parameter. The position information of CH l can be obtained
+locations change dynamically, requiring a distributed mainte-                    based on the distribution of positions of each CH at the end
+nance algorithm to adjust the clusters in real time, ensuring                    of the previous clustering period Tcls .
+their stability. The centralized method in the clustering stage                     The cluster size, that is, the expected number of UAVs in a
+provides a global view for better clustering results, while                      cluster, indicates on average how many CM UAVs are covered
+the distributed algorithm in the maintenance stage offers                        by this CH in a cluster. Therefore, it is calculated based on
+flexibility, lower control overhead, and real-time adaptability.                 the CH coverage probability:
+Together, these stages enable KMDUC to leverage cooperative
+information and dynamically adjust to the high mobility                                                                 
+                                                                                                                        N
+
+and self-organizing nature of the integrated space-air-ground                                               E [Nl ] =         Pil ,                      (14)
+                                                                                                                        i=1
+network.
+   1) Position-Based Clustering Algorithm: For the clustering                    where, E [Nl ] is the size of cluster l, N is the total number
+phase, the main factors affecting the efficiency of UAV task                     of UAVs, and Pil is the probability that UAV i is covered by
+scheduling include computational delay, queuing delay, and                       CH l. Theoretically, due to the randomness of UAV positions,
+transmission delay, all of which are closely related to the                      when UAVs are uniformly distributed, the cluster sizes of each
+position of the UAVs. In the scenario considered in this paper,                  cluster will be consistent. At this time, κ represents the number
+since each UAV follows its own motion model, path planning                       of UAVs per unit area. Since the communication radius of the
+for UAVs is not feasible by design. Therefore, we first need to                  UAV is a fixed value, the expected number of UAVs covered
+derive a preliminary clustering scheme based on the position                     by the CH can be represented by the product of the density κ
+information of the UAVs.                                                         of UAVs and the area of the coverage area of the CH. Given
+   During the clustering phase, the satellite first collects the                 the above assumption of uniform distribution, the theoretical
+position information of all UAVs. Based on the position                          value of the cluster size is:
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+WANG et al.: CLUSTER-BASED MULTI-AGENT TASK SCHEDULING FOR SAGINS                                                                                           35
+
+
+                                  
+                                  N
+                     E [Nl ] =          Pil = κπR 2 .                   (15)
+                                  i=1
+   The maximum value of the CH coverage probability, that is,
+the maximum probability that a UAV is covered by any CH,
+indicates that the closer the UAV is to all CHs, the greater this
+probability, and the more likely the UAV is to join any cluster.
+Obviously, it can be calculated based on the CH coverage
+probability as:
+                                        
+                                        cn
+                     Pmax = 1 −              (1 − Pil ),                (16)
+                                        l=1
+where, Pmax is the maximum value of the CH coverage
+probability, cn is the number of clusters, and Pil is the
+probability that UAV i is covered by CH l.
+   The larger the number of clusters cn , that is, the more CHs,
+the greater the maximum probability Pmax that a UAV is
+covered by any CH, that is, the more likely it is to join any                    Fig. 2.   Schematic of the cluster maintenance algorithm.
+cluster. However, when the number of clusters cn exceeds a
+critical value and becomes too large, the growth rate of the
+maximum probability Pmax that a UAV is covered by any CH
+                                                                                 re-electing CHs. The process is distributed, with each UAV
+will also tend to slow down, that is, increasing the number of
+                                                                                 tracking its own location and that of the CH, while the CH
+CHs has small effect on improving the coverage rate. At the
+                                                                                 maintains cluster structure information.
+same time, the larger the number of clusters cn , it also means
+                                                                                    The CH, responsible for task scheduling, collects status
+that the complexity of network decision-making is higher, and
+                                                                                 information (location, motion state, and task queue) from the
+the efficiency and stability of the network are lower. Therefore,
+                                                                                 UAVs and makes scheduling decisions. It then broadcasts
+it is necessary to find a balance point where Pmax reaches
+                                                                                 timestamped messages with its location.
+a preset threshold, and the number of clusters cn reaches a
+                                                                                    CMs receive broadcasts from multiple CHs, compare their
+minimum value. This balance point is the optimal value of
+                                                                                 locations, and calculate a coverage probability. The higher the
+the number of clusters. In summary, the optimal value of the
+                                                                                 probability, the closer the UAV is to the CH, making it more
+number of clusters is the minimum number of clusters that
+                                                                                 suitable to join that cluster. The UAV selects the CH with the
+makes the maximum value of the CH coverage probability
+                                                                                 highest probability and sends a message to join. If no message
+reach a preset threshold. It can be solved using the Lagrange
+                                                                                 is received, the UAV enters an isolated state.
+multiplier method [34], resulting in:
+                                                                                    Each CH regularly checks its list of CMs. If it discovers that
+                                ln(1 − Pmax )                                    members have left or joined, it updates its cluster structure.
+                     cn ∗ =                     ,                       (17)
+                              ln(1 − κπR 2 /N )                                  At each time slot, the CH calculates the central position of
+                                                                                 the cluster based on the location distribution information of
+where, cn ∗ is the optimal value of the number of clusters.
+                                                                                 the UAVs within the cluster and determines whether it is the
+Once the optimal number of clusters is determined, the
+                                                                                 UAV closest to the cluster center. Considering the stability of
+preliminary clustering scheme can be determined according to
+                                                                                 the clustering results, if the CH is not the cluster center for
+the K-Means algorithm. The objective function of the position-
+                                                                                 consecutive tele time slots, the CH is replaced with the latest
+based K-Means algorithm is to minimize the sum of the
+                                                                                 cluster center. The original CH sends a replacement message
+position distances of UAVs within a cluster.
+                                                                                 to the new CH UAV and broadcasts a CH update message to
+                          
+                          N                                                      the CMs, thereby achieving the re-election of the CH.
+                    J =          d (loci , locci , . . .),              (18)        The overall interaction of the cluster maintenance algorithm
+                           i=1                                                   is shown in Figure 2.
+where N is the total number of UAVs, loci is the position of                        3) Overall Process of the Dynamic UAV Clustering
+the i th UAV, locci is the position of the cluster center to which               Algorithm: The KMDUC algorithm is a location-based
+the i th UAV belongs, and d() is the position distance function.                 dynamic UAV clustering algorithm designed to adapt to
+   At this point, the preliminary clustering scheme has been                     the high mobility and self-organizing characteristics of the
+determined. The satellite broadcasts the clustering scheme                       integrated air-space-ground network. The KMDUC algorithm
+to all UAVs until after Tcls , when the clustering scheme is                     is divided into two stages: the clustering stage and the
+recalculated in the next clustering phase.                                       cluster maintenance stage. The clustering stage, coordinated
+   2) Cluster Maintenance Algorithm: During the cluster                          by satellites, uses the location-based K-Means algorithm based
+maintenance phase, the goal is to manage topological changes                     on the UAVs’ location information to determine the number of
+and membership variations due to UAV mobility. This includes                     clusters and CHs, as well as the initial assignment of CMs. The
+two main scenarios: UAVs joining or leaving clusters and                         cluster maintenance stage, under the autonomous coordination
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+36                                                               IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026
+
+
+
+ Algorithm 1: KMDUC Algorithm                                                    has a common optimization goal, promoting coordination and
+1 Input:Set of UAVs U , clustering period Tcls , CH                              cooperation among agents, improving collective performance,
+  replacement threshold tele ;                                                   and reducing variance during the learning process, as agents
+2 Output:Clustering result for UAVs;
+                                                                                 can learn from each other’s experiences and actions.
+3 Satellites initialize CHs, members, and stability counter;
+                                                                                    CM UAVs periodically transmit their state information,
+4 while UAV set U is not empty do
+                                                                                 including location and motion parameters, to the CH UAV
+5     if Clustering period reached t (mod Tcls ) = 0 then                        via Line-of-Sight (LoS) wireless communication [36]. When
+6          Satellites collect UAV locations and calculate the                    making offloading decisions, the CH UAV considers the
+           optimal number of clusters cn ∗ ;                                     location, motion characteristics, and task properties of the CM
+7          Satellites update and broadcast clustering results;                   UAVs being decided upon. In cooperative scenarios, since the
+                                                                                 decisions for all task-collecting CM UAVs are made by the CH
+8      for each CH al ∈ A do                                                     UAV, there is no competition for resources within the cluster.
+9          al collects member status and issues task                             The CH UAV makes judgments based on the information
+           scheduling;                                                           of the entire cluster, thus specific resource allocation is no
+10         al broadcasts its location and checks if it is the                    longer needed. The local observation space no longer includes
+           center;                                                               information on the resource allocation vector but maintains
+11         if al is not the center then                                          the vector of all computational resources within the cluster
+12             if not the center for tele then                                   coverage denoted as R∗ . In the design of the action space, the
+13                  al replaces the head and broadcasts                          offloading priority of tasks is no longer independent per UAV
+                    update;                                                      but is shared within the entire cluster.
+                                                                                    The local observation space ot includes four parts: compu-
+14     for each member Ui ∈ U do                                                 tational resource information, motion information of the UAVs
+15         Ui sends status to head, executes task decisions;                     pending decision, the transmission rate vector of the UAVs
+16         Ui receives head location and calculates coverage                     pending decision, and current task feature information.
+           probability;
+17         if Ui finds greater coverage probability then                                               ot = (R∗ , M, Tr, Task).                          (20)
+18             Ui switches CH and sends update;                                     The resource vector R∗ represents the computational
+19         else                                                                  resource information within the cluster coverage, including all
+20             if Ui receives no information from head then                      computational resources of ground stations within the cluster
+21                 Ui becomes isolated;                                          coverage and the evenly distributed resources of satellites. Due
+                                                                                 to limited coverage, the computational resources of ground
+                                                                                 stations at the cluster center can be considered exclusively
+                                                                                 used by that cluster. On the other hand, the computational
+                                                                                 resources at the cluster edges are shared by all clusters,
+and communication of UAVs, dynamically adjusts the structure                     fully utilizing the complete cooperative relationship between
+of the cluster and the selection of the CH according to the                      clusters. The motion information M = (loc, θ, v ) includes
+dynamic changes of the UAVs, ensuring the stability and                          the dynamic characteristics of the UAVs pending decision,
+efficiency of the cluster. The following is a summary of the                     such as their location, direction of movement, and speed. The
+KMDUC algorithm process, with the overall process shown                          transmission rate vector Tr = (tr 0 , tr 1 , . . . , tr m ) captures
+in Algorithm 1.                                                                  the communication characteristics between the UAVs pending
+                                                                                 decision and each BS and satellite. Task requirements Task
+B. Multi-Agent Cooperative Offloading Algorithm                                  include the size of the task, computational complexity, and
+   Following the clustering process, the intelligent agents on                   latency requirements.
+each CH are responsible for the task offloading decisions                           The action space at represents the offloading decision made
+within their cluster. In cooperative scenarios, we focus on how                  by the CH agent for the kth computational task, consisting of
+to enhance the cooperative interaction of agents to increase the                 two parts:
+overall system profit, while also aiming to improve training                         at = {αk∗ , ηk∗ } where         αk ∈ D       and     ηk ∈ [0, 1], (21)
+efficiency and convergence performance as much as possible.
+   To ensure the achievement of the optimization objectives                      where αk∗ indicates the target device to which the task k will be
+stated in problem (8)—maximizing the overall system profit—                      offloaded. The second part of the action space is a continuous
+the reward function is set as follows:                                           variable ηk∗ ∈ [0, 1], representing the computational priority of
+                                                                                 the task k on the selected target device, with all computational
+                                        M 
+                                         L
+                                                                                 tasks being processed on the target device in order according
+                 r (s, a) = max                     αk ,j Gk ,            (19)
+                               α k ,j                                            to ηk∗ .
+                                        j =1 k =1
+                                                                                    To better implement the cooperative mode of multi-agents,
+where, each agent’s reward function represents the overall                       this paper combines the MADDPG algorithm to achieve
+task profit of the system, thereby maximizing social welfare.                    centralized training and distributed execution in the integrated
+The shared reward function ensures that the group of agents                      air-space-ground network. In this mode, the dispersed CH agents
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+WANG et al.: CLUSTER-BASED MULTI-AGENT TASK SCHEDULING FOR SAGINS                                                                                           37
+
+
+
+                                                                                    Critic network parameters are updated by applying the
+                                                                                 stochastic gradient descent method:
+                                                                                                                      
+                                                                                                  Q      Q            Q
+                                                                                                 θi ← θi − α∇θQ Li θi .              (24)
+                                                                                                                           i
+
+                                                                                    In distributed execution, each agent can only use its own
+                                                                                 local observations and selects an action using its own dis-
+                                                                                 tributed Actor network. The Actor network is a deterministic
+                                                                                 policy that maps the agent’s observation to an action. The
+                                                                                 Actor network updates by applying the policy gradient method,
+                                                                                 maximizing the expected Q value of the Critic network as
+                                                                                 follows:
+                                                                                                                           
+                                                                                         ∇θµ J θiμ = Eo∼D ∇θµ μi oi |θiμ
+                                                                                             i                    i
+                                                                                                                         
+                                                                                                                        Q 
+                                                                                                          ·∇ai Qi o, a|θi a =μ (o ) , (25)
+Fig. 3. Centralized training and distributed execution cooperative framework.                                                           i    i   i
+
+                                                                                 where, oi is the individual observation of agent i, and μi (oi )
+                                                                                 is the individual action of agent i. Actor network parameters
+train a centralized Critic network based on the observations
+                                                                                 are updated by applying the stochastic gradient ascent method:
+and actions of all agents, but act using their own distributed
+                                                                                                                           
+Actor network based on their local observations [37].                                              θiμ ← θiμ + α∇θµ J θiμ .                 (26)
+                                                                                                                               i
+   The algorithmic design of cooperative MADDPG consists
+of two main components: the Actor network for each agent                           For the target networks, parameters are updated through soft
+and a Critic network. The Actor network is a deterministic                       updates.
+policy that outputs actions based on the agent’s observations,                                          μ         μ               μ
+                                                                                                       θi ← τ θi + (1 − τ )θi .                          (27)
+while the Critic network models a state-action value function,
+estimating the expected return for each agent given the                             The soft update method ensures a stable learning process
+global joint observations and actions of all agents. The key                     by gradually blending the parameters of the target networks
+difference between MADDPG and single-agent DDPG is that                          with those of the learned networks. This approach avoids
+the Critic network takes the joint global observations and                       drastic changes in the policy, which could lead to divergence or
+actions as input, while the Actor network only takes individual                  instability in the learning process. The parameter controls the
+observations as input.                                                           rate at which the target networks are updated, with a smaller tau
+   This paper deploys the centralized training process on satel-                 resulting in slower updates and a more stable learning process.
+lites, which collect global observation and action information                      In summary, the cooperative MADDPG framework facili-
+to train the Global Critic network while placing the Actor                       tates the centralized training of a global Critic network that
+network on each lead UAV for task offloading decisions.                          leverages the full state and action space, while enabling
+The centralized training and distributed execution cooperative                   distributed execution where each agent acts based on its
+MADDPG work mode is shown in Figure 3.                                           local observations and a distributed Actor network. This
+   In centralized training, each agent can access the joint                      approach allows for the efficient coordination of multiple
+observations and actions of all agents, as well as the global                    agents in complex environments, such as the integrated air-
+reward function. This allows agents to learn a centralized Critic                space-ground network, where communication constraints and
+network that can estimate the Q value for each agent based                       dynamic scenarios are prevalent. The cooperative nature of
+on the joint observations and information of all agents. The                     the algorithm ensures that all agents work towards a common
+Critic network updates by minimizing the mean squared error                      goal, maximizing the overall system profits and promoting a
+between the target Q value and the current Q value:                              cohesive multi-agent collaboration.
+                                                 2                            The paradigm of centralized training and distributed execu-
+     Li θiQ = E(o,a,r ,o  )∼D Qi o, a|θiQ − yi           , (22)                 tion enables the algorithm to cope with partial observability,
+                                                                                 non-stationarity, and communication challenges in multi-agent
+where, o = (o 1 , . . . , o N ) is the joint observation of all agents,          environments. This is because agents can learn from global
+a = (a 1 , . . . , a N ) is the joint action of all agents, and yi =             information during training and act independently during
+                       Q
+ri +γQi (o  , a  |θi ) is the target Q value, calculated using the            execution. Moreover, agents can optimize the global reward
+target Critic network Qi and target Actor network μi , where                   function while maintaining their individual strategies, and they
+                     
+a i = μi (o i |θiμ ).                                                         do not need to communicate or coordinate with each other
+    The gradient of the loss function for the Critic network                     during execution, reducing communication overhead and the
+parameters is:                                                                   risk of communication failures. By utilizing centralized train-
+                                                                           ing and distributed execution, the algorithm fully leverages the
+                  Q                                     Q
+     ∇θQ Li θi = 2E(o,a,r ,o  )∼D Qi o, a|θi − yi                               advantages of satellite coverage and broadcasting for efficient
+       i
+                                                                               collection and dissemination of parameters. It also adapts well
+                                               Q
+                             ×∇θQ Qi o, a|θi       .               (23)          to the highly dynamic nature of the environment, using UAVs
+                                  i
+
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+38                                                          IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026
+
+
+
+ Algorithm        2:    Multi-Agent        Cooperative       Offloading              Algorithm 3: CMADDPG Algorithm
+ Algorithm                                                                       1 Input:Integrated air-space-ground network environment;
+1 Input:Set of cnum CH agents with Actor networks,                               2 Output:Task offloading decisions;
+  global Critic network, and experience pool;                                    3 Initialize environment and neural networks;
+2 Output:Task offloading strategy;                                               4 while within the operation cycle do
+3 Initialize global Critic network Q, target network Q ,
+                                                                                5      if reaching clustering period Tcls then
+                                                                                             Satellites compute optimal clusters cn ∗ and
+                              
+  random weights θ , θ ;
+                      Q     Q                                                    6
+4 Initialize each agent’s Actor network μi , target network                                  broadcast the clustering results;
+                           μ μ
+  μi , random weights θi , θi ;                                                 7      for each time slot do
+5 Initialize experience pool D and reward function;                              8          for each UAV do
+6 for each training cycle Tupdate do                                             9              Join/leave cluster, collect local observation,
+7       for each time slot do                                                                   send to CH UAV i;
+8           for each CM UAV do                                                  10           CH UAV i selects offloading decision and stores
+9               Collect local observation, and send it to CH                                 transition;
+                UAV i;                                                          11           for each CH UAV do
+10          CH UAV i selects offloading decision                                12               Update and broadcast CH;
+                          μ
+            ai = μi (oi |θi );
+11          CH issues action, member UAV executes it;                           13      Satellites collect experience pool and network
+12          CH observes reward ri and next local observation                            parameters from each CH UAV;
+            oi ;                                                               14      Satellites update global Critic and CH Actor
+13          Store transition (oi , ai , ri , oi ) in experience pool                   networks;
+            D;                                                                  15      Satellites distribute updated network parameters;
+
+14     Sample batch B from experience pool D;
+15     Update global Critic network Q using equation (24);
+16     Update each agent’s Actor network using equation                          scheduling of UAVs in an integrated air-space-ground network,
+       (26);                                                                     enhancing system efficiency and profits. The algorithm is
+17     Soft update global Critic and each agent’s target                         outlined in Algorithm 3.
+       network using equation (27);                                                 The CMADDPG algorithm first uses satellites for coordi-
+                                        μ
+18     Send updated Actor parameters θi to each                                  nation and the K-Means algorithm to cluster UAVs needing
+       CH UAV i;                                                                 task scheduling, determining the number of clusters, CHs,
+                                                                                 and initial member allocations. Next, it adapts dynamically by
+                                                                                 adjusting cluster structures and CH selections to respond to
+                                                                                 UAV mobility, ensuring stability and efficiency. The algorithm
+for flexible task scheduling and fully adapting to the multi-                    then deploys intelligent agents on CH UAVs to make offload-
+dimensional heterogeneity of the integrated air-space-ground                     ing decisions based on their Actor networks. These decisions
+network.                                                                         include task offloading targets, and computation priorities,
+   The cooperative offloading algorithm is as shown in                           and are stored in the experience pool. Finally, the algorithm
+Algorithm 2. In each time slot, each CM UAV collects its local                   leverages satellite coverage to periodically collect data from
+observations and sends them to the CH UAV. The CH UAV                            the experience pool and Actor network parameters, training
+uses its Actor network to make offloading decision actions,                      the Critic and Actor networks. The updated Actor network
+issues them to the corresponding CM UAVs, and stores them                        parameters are distributed to the CH UAVs for more efficient
+in the experience pool. The satellite regularly collects local                   offloading decisions.
+observations and actions from the CH UAVs according to
+its Tupdate update cycle, forms joint behaviors and actions                      D. Complexity Analysis
+to be stored in the experience pool, updates the Critic and
+Actor networks according to Equations (24) and (26), and                            We divide the algorithm into two parts: clustering and
+then distributes the updated Actor network parameters to each                    offloading, and analyze the algorithm complexity separately:
+CH UAV.                                                                             1) KMDUC Algorithm: According to Algorithm 1, the
+                                                                                 complexity from Lines 8 to 13 is O(cn∗ ), and the complexity
+                                                                                 from Lines 14 to 21 is O(Nu ). Assuming the while loop
+C. Overall Process of Cluster-Based Cooperative Offloading                       terminates after at most L iterations, the overall complexity is:
+Algorithm for Multi-Agent Systems                                                O(L(cn∗ + Nu )) = O(LNu )
+   In summary, the CMADDPG algorithm is a cluster-based                             2) Multi-Agent Cooperative Offloading Algorithm: The
+cooperative task scheduling approach for multi-agent systems,                    complexity of a neural network mainly depends on the matrix
+consisting of two components: the KMDUC UAV clustering                           operations in each layer during forward propagation and
+algorithm and the multi-agent cooperative offloading algo-                       backward propagation. Let the dimension of the observation,
+rithm. Its goal is to achieve coordinated control and intelligent                according to Equation (20), be denoted as dimo , and the
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+WANG et al.: CLUSTER-BASED MULTI-AGENT TASK SCHEDULING FOR SAGINS                                                                                           39
+
+
+                            TABLE II
+        S IMULATION PARAMETERS FOR C OOPERATIVE S CENARIO
+
+
+
+
+                                                                                 Fig. 4.   Reward during training cycles.
+
+
+
+dimension of the action, according to Equation (21), be                             In terms of the neural networks, both the Actor and Critic
+denoted as dima . Assume the actor network has na hidden                         networks contain two hidden layers. The Actor network has
+layers, and the dimension of each hidden layer is ea . Then,                     128 neurons in both layers, while the Critic network has 256
+the complexity of the actor network is: Oactor = O(dimo ×                        neurons in one layer and 128 neurons in another, with different
+ea + (na − 1) × ea2 + ea × dima ). Assume the critic network                     learning rates for both, as shown in Table II. The training still
+has nc hidden layers, and the dimension of each hidden layer                     employed the Adam optimizer and tanh activation function.
+is ec . Then, the complexity of the critic network is: Ocritic =                 For exploration noise, the experiment used the Ornstein-
+O((dimo + dima ) × ec + (nc − 1) × ec2 + ec × 1).                                Uhlenbeck process to generate noise [37], with a mean of 0,
+   Since the CMADDPG algorithm first clusters the large-scale                    a standard deviation of 0.3, and a volatility value of 0.15.
+UAVs and further delegates decision-making      to the CHs, the                     The comparative methods chosen for this experiment are the
+                                         c∗                                      naive MADDPG algorithm used in the literature [38] and the
+algorithm complexity is reduced to Nnu of that when each
+UAV makes independent decisions. Furthermore, in large-scale                     task offloading method of Multi-Agent Actor-Critic (MAAC)
+scenarios where cn∗        Nu , the CMADDPG algorithm is                         used in the literature [39]. Compared to the CMADDPG
+significantly faster and more efficient.                                         algorithm of this paper, the MADDPG algorithm lacks a
+                                                                                 clustering process, so each UAV independently makes offload-
+                                                                                 ing decisions without following the command of the CH,
+                 V. P ERFORMANCE E VALUATION                                     leading to an increase in the number of offloading agents
+   In this section, we validate the effectiveness of the                         in the network. In the MAAC algorithm, each agent has
+CMADDPG algorithm through numerical simulation exper-                            an independent Critic network, which is different from the
+iments. We first introduce the integrated air-space-ground                       CMADDPG and MADDPG algorithms.
+network simulation environment and the basic settings of the
+algorithm, then present the performance metrics, and finally                     B. Results
+conduct a series of simulation experiments to verify the
+                                                                                    Figure 4 shows the change in the reward of CMADDPG
+algorithm’s performance compared to benchmark algorithms.
+                                                                                 with the training cycles, reflecting the convergence
+                                                                                 performance. It can be seen that in the early stages of training,
+A. Experimental Parameters                                                       the agents are in the stage of exploring the environment.
+   We conduct simulation experiments within a larger area.                       Around 1100 training cycles, the curve experiences a steep
+This is due to the consideration that resource competition                       increase, indicating the rapid convergence performance of
+is often influenced by the communication range of UAVs                           the multi-agent model after completing exploration, reflecting
+and BSs, which are concentrated in smaller areas, while                          the performance advantage of model convergence under
+UAV cooperation still exists extensively within larger coverage                  the cooperative mode of centralized training and distributed
+areas. This section conducts simulations within a square area                    execution, allowing the model to quickly adapt to complex
+with a side length of 5 km, which is four times the area of                      cooperative scenarios.
+the competitive scenario simulation setup, deploying 25 task                        Figure 5 shows the change in the number of cycles required
+processing BSs with computational capabilities. The computa-                     for convergence of each algorithm as the number of UAVs
+tional power of these BSs varies between 20 GHz and 40 GHz.                      increases. It is clear from the figure that the training duration
+In the task scheduling scenario, 40 UAVs are deployed, with                      required for the CMADDPG algorithm is significantly lower
+their movement speeds following a normal distribution. The                       than that of the MADDPG and MAAC algorithms, benefiting
+arrival of computing tasks follows a Poisson distribution with                   from the clustering algorithm that deploys agents only on the
+a given arrival rate, while task size, computational load, and                   CH UAVs, thus reducing the number of UAVs that need to
+latency requirements follow a uniform distribution. Table II                     make decisions. In addition, the number of cycles required
+provides key parameters used in the simulation under the                         for convergence of the CMADDPG algorithm first decreases
+cooperative scenario.                                                            and then increases with the number of UAVs. This is because
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+40                                                           IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026
+
+
+
+
+Fig. 5.   Episodes for convergence as UAV count increases.                       Fig. 7.   System profit under varying loads determined by task arrival rates.
+
+
+
+
+Fig. 6.   Overall system profit over time.
+
+
+when the number of UAVs is small, they are distributed
+sparsely over a wide area, making it difficult to form clus-                     Fig. 8.   Normalized system profit in three scenarios.
+ters, leaving many isolated UAVs. As the number of UAVs
+increases, isolated UAVs can gradually be connected into
+clusters, reducing the number of agents required for offloading                     Figure 7 describes the change in system profit with the
+decisions, thus improving convergence performance. For the                       change in system load, which is determined by the task
+MADDPG and MAAC algorithms, the time required for con-                           arrival rate. The higher the task arrival rate, the heavier the
+vergence increases with the number of agents, even showing                       system load, indicating that the system needs to handle more
+an exponential growth trend. The convergence performance of                      tasks. The CMADDPG algorithm shows excellent performance
+the MAAC algorithm is significantly longer because it does                       under both low and high loads, converging earlier, indicating
+not adopt the cooperative mode of centralized training and                       that it utilizes system resources more fully earlier on. The
+distributed execution, and the algorithm itself lacks robustness.                benchmarked algorithm MADDPG shows similar load con-
+   Figure 6 shows the change in the overall system profit over                   vergence performance, reaching a high point in profits at a
+time. Compared to the competitive scenario, the fluctuation                      task arrival rate close to that of the CMADDPG algorithm, but
+of the overall system profit has significantly increased, which                  under the same load conditions, its scheduling of tasks is not
+is caused by the increased dynamism due to the increase in                       as good as the CMADDPG algorithm, with decisions based
+the number of UAVs within a larger range. Evidently, the                         only on local observation information leading to insufficient
+CMADDPG algorithm exhibits the best overall performance,                         profits. The MAAC algorithm maintains growth in profits over
+achieving a 25% improvement in system profit compared to                         a longer load interval, but the profits are always insufficient,
+MADDPG and a 42.86% improvement compared to MAAC.                                indicating poor task scheduling decision performance.
+This is attributed to the clustering algorithm, where the CH                        Figure 8 shows the normalized system profit under three
+can better utilize the information of all members within the                     different scenarios: delay-sensitive, computation-intensive, and
+cluster for decision-making and training, resulting in a more                    balanced distribution. In the experiment, in the delay-sensitive
+stable curve.                                                                    scenario, the probability of generating tasks with latency
+   Although MADDPG has utilized the sample data of other                         requirements in the 0-20ms range is increased, with the
+agents in terms of training efficiency, there is still a lack                    proportion of delay-intensive tasks in the scenario increased
+of communication and cooperation among agents during the                         to 30%, while increasing the weight parameter λρ for latency
+decision-making process, resulting in higher volatility of the                   in the task profits function. For the computation-intensive
+curve. MAAC, due to the insufficiency of the algorithm itself,                   scenario, the probability of generating larger computational
+shows disadvantages in all aspects.                                              tasks is increased, while reducing the weight parameter λρ for
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+WANG et al.: CLUSTER-BASED MULTI-AGENT TASK SCHEDULING FOR SAGINS                                                                                            41
+
+
+
+                                                                                 distributed execution framework, effectively improving
+                                                                                 training efficiency and decision stability. Practically,
+                                                                                 CMADDPG reduces communication overhead and enhances
+                                                                                 task scheduling efficiency, making it more adaptable and
+                                                                                 advantageous in large-scale UAV task scheduling scenarios.
+
+
+                                                                                                            VI. C ONCLUSION
+                                                                                    This paper has addressed the task scheduling problem
+                                                                                 in cooperative SAGIN scenarios and has proposed the
+                                                                                 CMADDPG algorithm. The algorithm first applies the K-
+                                                                                 Means algorithm for centralized clustering of UAVs and
+                                                                                 has performed distributed cluster maintenance within each
+                                                                                 cluster, introducing the KMDUC algorithm for a hybrid
+                                                                                 distributed-centralized control approach. Building on this, we
+                                                                                 have proposed a cooperative offloading algorithm based on
+Fig. 9.   Task completion rate in three scenarios.                               MADDPG, leveraging satellite-based information dissemina-
+                                                                                 tion and parameter sharing. In this algorithm, each cluster
+                                                                                 head makes offloading decisions in a distributed manner,
+                                                                                 with centralized evaluation, enabling centralized training and
+latency in the task profits function. In the balanced distribution               distributed execution. Simulation results have demonstrated
+scenario, the experimental settings remain unchanged.                            favorable and rapid convergence characteristics, validating
+   As can be seen under different task distributions, the                        a significant improvement in system profit, with a 25%
+CMADDPG algorithm maintains the optimal profits, demon-                          increase in system profit compared to benchmark methods. The
+strating the performance guarantee of the CMADDPG                                CMADDPG algorithm leverages the collaboration of satellites,
+algorithm under more stringent scenarios. In the delay-                          UAVs, and BSs in SAGIN to resolve conflicts and improve
+sensitive scenario, the profits of the CMADDPG algorithm are                     network efficiency, highlighting the potential of intelligent
+higher than in the balanced distribution, indicating that the                    collaborative networks.
+CMADDPG algorithm has fully prioritized the scheduling of                           In our future research, we will consider energy efficiency in
+delay-sensitive tasks and obtained higher profits from them,                     task scheduling, aiming to optimize the energy consumption of
+reflecting the intelligence and adaptability of the CMADDPG                      UAVs and base stations while improving system performance.
+algorithm. However, in the computation-intensive scenario, the
+system’s profits decrease, which is due to the reduction of λρ
+leading to a decrease in the profits obtained per unit of task                                                 R EFERENCES
+computation.                                                                      [1] B. Shang, Y. Yi, and L. Liu, “Computing over space–air–ground
+   The MADDPG algorithm maintains a trend similar to that                             integrated networks: Challenges and opportunities,” IEEE Netw., vol. 35,
+                                                                                      no. 4, pp. 302–309, Jul./Aug. 2021.
+of the CMADDPG algorithm but with a certain performance                           [2] H. Jiang, X. Dai, Z. Xiao, and A. Iyengar, “Joint task offloading
+gap. The system profit of the MAAC algorithm do not vary                              and resource allocation for energy-constrained mobile edge computing,”
+much across different task distribution scenarios, indicating its                     IEEE Trans. Mobile Comput., vol. 22, no. 7, pp. 4000–4015, Jul. 2023.
+lack of adaptability to the environment.                                          [3] J. Liu, Y. Shi, Z. M. Fadlullah, and N. Kato “Space–air–ground
+                                                                                      integrated network: A survey,” IEEE Commun. Surveys Tuts., vol. 20,
+   Figure 9 shows the task completion rate under three dif-                           no. 4, pp. 2714–2741, 4th Quart., 2018.
+ferent scenarios: delay-sensitive, computation-intensive, and                     [4] Y. Jiang et al., “6G non-terrestrial networks enabled low-altitude econ-
+balanced distribution. It can be observed that under different                        omy: Opportunities and challenges,” 2024, arXiv:2311.09047.
+                                                                                  [5] S. Kandeepan, K. Gomez, L. Reynaud, and T. Rasheed, “Aerial-
+task distributions, the CMADDPG algorithm maintains the                               terrestrial communications: Terrestrial cooperation and energy-efficient
+optimal task completion rate. Combined with Figure 8, the                             transmissions to aerial base stations,” IEEE Trans. Aerosp. Electron.
+CMADDPG algorithm, with a lower task completion rate in                               Syst., vol. 50, no. 4, pp. 2715–2735, Oct. 2014.
+                                                                                  [6] Z. Liu, C. Lin, and G. Chen, “Development and trend of space-
+the delay-sensitive scenario, achieves higher system profit,                          based information network,” J. Phys. Conf., vol. 1544, no. 1, 2020,
+indicating that the CMADDPG algorithm can prioritize the                              Art. no. 12180.
+scheduling of delay-sensitive tasks under resource-limited                        [7] Q. Tang and B. Li, “Mobile edge computing technology for space–air–
+                                                                                      ground integrated networks,” Wireless Commun. Technol., vol. 47, no. 1,
+stringent scenarios, demonstrating the robustness of its                              pp. 27–35, 2021.
+scheduling decisions.                                                             [8] F. Wu, F. Lyu, H. Wu, J. Ren, Y. Zhang, and X. Shen, “Characterizing
+   In summary, compared with MADDPG and MAAC,                                         user association patterns for optimizing small-cell edge system
+                                                                                      performance,” IEEE Netw., vol. 37, no. 3, pp. 210–217, May/Jun. 2023.
+CMADDPG integrates UAV clustering and hierarchical
+                                                                                  [9] G. Sun, Z. Wang, H. Su, H. Yu, B. Lei, and M. Guizani, “Profit
+decision-making in its architecture, demonstrating notable                            maximization of independent task offloading in MEC-enabled 5G
+advantages in enhancing system scalability, optimizing                                Internet of Vehicles,” IEEE Trans. Intell. Transp. Syst., vol. 25, no. 11,
+communication overhead, and reducing decision conflicts.                              pp. 16449–16461, Nov. 2024.
+                                                                                 [10] F. Wu, F. Lyu, J. Ren, P. Yang, K. Qian, and S. Gao, “Characterizing
+Theoretically, CMADDPG combines clustering algorithms,                                internet card user portraits for efficient churn prediction model design,”
+reinforcement learning, and the centralized training and                              IEEE Trans. Mobile Comput., vol. 23, no. 2, pp. 1735–1752, Feb. 2024.
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+42                                                           IEEE TRANSACTIONS ON COGNITIVE COMMUNICATIONS AND NETWORKING, VOLUME 12, 2026
+
+
+
+[11] Q. Chen, W. Meng, S. Han, C. Li, and H.-H. Chen, “Robust task schedul-       [26] Y. Qin, Y. Yang, F. Tang, X. Yao, M. Zhao, and N. Kato, “Differentiated
+     ing for delay-aware IoT applications in civil aircraft-augmented SAGIN,”          federated reinforcement learning based traffic offloading on space-air-
+     IEEE Trans. Commun., vol. 70, no. 8, pp. 5368–5385, Aug. 2022.                    ground integrated networks,” IEEE Trans. Mobile Comput., vol. 23, no.
+[12] X. Dai, X. Chen, L. Jiao, Y. Wang, S. Du, and G. Min, “Priority-aware             12, pp. 11000–11013, Dec. 2014.
+     task offloading and resource allocation in satellite and HAP assisted        [27] N. Cheng, F. Lyu, W. Quan, C. Zhou, H. He, and W. Shi, “Space/aerial-
+     edge-cloud collaborative networks,” in Proc. 15th Int. Conf. Commun.              assisted computing offloading for IoT applications: A learning-based
+     Softw. Netw. (ICCSN), 2023, pp. 166–171.                                          approach,” IEEE J. Sel. Areas Commun., vol. 37, no. 5, pp. 1117–1129,
+[13] G. Sun, Y. Wang, H. Yu, and M. Guizani, “Proportional fairness-aware              May 2019.
+     task scheduling in space–air–ground integrated networks,” IEEE Trans.        [28] H. Lin et al., “A survey on computation offloading modeling for
+     Services Comput., vol. 17, no. 6, pp. 4125–4137, Nov./Dec. 2024.                  edge computing,” J. Netw. Comput. Appl., vol. 169, Nov. 2020,
+[14] C. Zhou, W. Wu, H. He, P. Yang, F. Lyu, and N. Cheng, “Deep rein-                 Art. no. 102781.
+     forcement learning for delay-oriented IoT task scheduling in SAGIN,”         [29] K. Jeffay, D. Stanat, and C. Martel, “On non-preemptive scheduling of
+     IEEE Trans. Wireless Commun., vol. 20, no. 2, pp. 911–925, Feb. 2021.             period and sporadic tasks,” in Proc. 12th Real-Time Syst. Symp., 1991,
+[15] H. Cui et al., “Space–air–ground integrated network (SAGIN) for 6G:               pp. 129–139.
+     Requirements, architecture and challenges,” China Commun., vol. 19,          [30] L. Wang, K. Wang, C. Pan, W. Xu, N. Aslam, and L. Hanzo,
+     no. 2, pp. 90–108, 2022.                                                          “Multi-agent     deep     reinforcement    learning-based       trajectory
+[16] P. Zhang, P. Yang, N. Kumar, and M. Guizani, “Space–air–ground                    planning for multi-UAV assisted mobile edge computing,”
+     integrated network resource allocation based on service function chain,”          IEEE Trans. Cogn. Commun. Netw., vol. 7, no. 1, pp. 73–84,
+     IEEE Trans. Veh. Technol., vol. 71, no. 7, pp. 7730–7738, Feb. 2022.              Mar. 2021.
+[17] H. Liang, Z. Yang, G. Zhang, and H. Hou, “Resource allocation for            [31] F. Tang, H. Hofner, N. Kato, K. Kaneko, Y. Yamashita, and M. Hangai,
+     space–air–ground integrated networks: A comprehensive review,” J.                 “A deep reinforcement learning-based dynamic traffic offloading in
+     Commun. Inf. Netw., vol. 9, no. 1, pp. 1–23, Mar. 2024.                           space–air–ground integrated networks (SAGIN),” IEEE J. Sel. Areas
+[18] Z. Wang, G. Sun, H. Su, H. Yu, B. Lei, and M. Guizani, “Low-latency               Commun., vol. 40, no. 1, pp. 276–289, Jan. 2022.
+     scheduling approach for dependent tasks in MEC-enabled 5G vehicular          [32] M. R. Ramzan, M. Naeem, M. Altaf, and W. Ejaz, “Multicriterion
+     networks,” IEEE Internet Things J., vol. 11, no. 4, pp. 6278–6289,                resource management in energy-harvested cooperative UAV-enabled IoT
+     Feb. 2024.                                                                        networks,” IEEE Internet Things J., vol. 9, no. 4, pp. 2944–2959,
+[19] M. D. Nguyen, L. B. Le, and A. Girard, “Computation offloading, UAV               Feb. 2022.
+     placement, and resource allocation in SAGIN,” in Proc. IEEE Globecom         [33] L. Gupta, R. Jain, and G. Vaszkun, “Survey of important issues in UAV
+     Workshops (GC Wkshps), 2022, pp. 1413–1418.                                       communication networks,” IEEE Commun. Surveys Tuts., vol. 18, no. 2,
+[20] H. Cao, S. Garg, G. Kaddoum, M. Alrashoud, and L. Yang, “Efficient                pp. 1123–1152, 2nd Quart., 2016.
+     resource allocation of slicing services in softwarized space-aerial-ground   [34] S. Bhandari, X. Wang, and R. Lee, “Mobility and location-aware
+     integrated networks for seamless and open access services,” IEEE Trans.           stable clustering scheme for UAV networks,” IEEE Access, vol. 8,
+     Veh. Technol., vol. 73, no. 7, pp. 9284–9295, Jul. 2024.                          pp. 106364–106372, 2020.
+[21] S. He et al., “Towards symbiotic SAGIN through inter-operator resource       [35] L. J. Reed and J. Berkson, “The application of the logistic function
+     and service sharing: Joint orchestration of user association and radio            to experimental data,” J. Phys. Chem., vol. 33, no. 5, pp. 760–779,
+     resources,” 2024, arXiv:2404.16611.                                               2002.
+[22] M. Jia, J. Wu, Q. Guo, and Y. Yang, “Service-oriented SAGIN with             [36] A. V. Savkin, C. Huang, and W. Ni, “Joint multi-UAV path planning
+     pervasive intelligence for resource-constrained users,” IEEE Netw.,               and LoS communication for mobile-edge computing in IoT networks
+     vol. 38, no. 2, pp. 79–86, Mar. 2024.                                             with RISs,” IEEE Internet Things J., vol. 10, no. 3, pp. 2720–2727,
+[23] L. Huang, R. Sun, N. Cheng, Y. Hui, and D. Liang, “Delay-oriented                 Feb. 2023.
+     knowledge-driven resource allocation in SAGIN-based vehicular                [37] R. Lowe et al., “Multi-agent actor–critic for mixed cooperative-
+     networks,” in Proc. IEEE Wireless Commun. Netw. Conf. (WCNC), 2023,               competitive environments,” in Proc. Adv. Neural Inf. Process. Syst.,
+     pp. 1–6.                                                                          vol. 30, 2017, pp. 1–12.
+[24] S. Zhang, A. Liu, C. Han, X. Liang, X. Xu, and G. Wang, “Multiagent          [38] A. M. Seid, G. O. Boateng, B. Mareri, G. Sun, and W. Jiang, “Multi-
+     reinforcement learning-based orbital edge offloading in SAGIN support-            agent DRL for task offloading and resource allocation in multi-UAV
+     ing Internet of Remote Things,” IEEE Internet Things J., vol. 10, no. 23,         enabled IoT edge network,” IEEE Trans. Netw. Service Manag., vol. 18,
+     pp. 20472–20483, Dec. 2023.                                                       no. 4, pp. 4531–4547, Dec. 2021.
+[25] H. Tu, P. Bellavista, L. Zhao, G. Zheng, K. Liang, and K.-K. Wong,           [39] S. Zhu, L. Gui, D. Zhao, N. Cheng, Q. Zhang, and X. Lang,
+     “Priority-based load balancing with multiagent deep reinforcement                 “Learning-based computation offloading approaches in UAVs-assisted
+     learning for space–air–ground integrated network slicing,” IEEE Internet          edge computing,” IEEE Trans. Veh. Technol., vol. 70, no. 1, pp. 928–944,
+     Things J., vol. 11, no. 19, pp. 30690–30703, Oct. 2024.                           Jan. 2021.
+
+
+
+
+Authorized licensed use limited to: Nanjing Univ of Post & Telecommunications. Downloaded on May 14,2026 at 03:04:02 UTC from IEEE Xplore. Restrictions apply.
+

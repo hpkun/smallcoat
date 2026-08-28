@@ -179,7 +179,9 @@ def build_medium_env(
         communication_model=base_env.communication_model,
         network_profiles=base_env.network_profiles,
         area_side_length_m=simulation_config.area.side_length_m,
-        enable_resource_awareness=enable_resource_awareness,
+        observation_profile="proposed",
+        energy_config=simulation_config.energy,
+        queue_capacity=simulation_config.queue_capacity,
     )
     reward_calculator = SharedRewardCalculator(
         RewardConfig(normalize_profit_scale=1_000_000_000.0)
@@ -295,7 +297,9 @@ def build_training_env(
         communication_model=base_env.communication_model,
         network_profiles=base_env.network_profiles,
         area_side_length_m=simulation_config.area.side_length_m,
-        enable_resource_awareness=enable_resource_awareness,
+        observation_profile="proposed",
+        energy_config=simulation_config.energy,
+        queue_capacity=simulation_config.queue_capacity,
     )
     reward_calculator = SharedRewardCalculator(RewardConfig(normalize_profit_scale=1_000_000_000.0))
     return CMADDPGEnv(
@@ -418,7 +422,9 @@ def build_small_scale_env(
         communication_model=base_env.communication_model,
         network_profiles=base_env.network_profiles,
         area_side_length_m=simulation_config.area.side_length_m,
-        enable_resource_awareness=enable_resource_awareness,
+        observation_profile="proposed",
+        energy_config=simulation_config.energy,
+        queue_capacity=simulation_config.queue_capacity,
     )
     reward_calculator = SharedRewardCalculator(RewardConfig(normalize_profit_scale=1_000_000_000.0))
     return CMADDPGEnv(
@@ -460,7 +466,7 @@ def main() -> None:
         "--redundancy-mode",
         choices=["none", "hybrid"],
         default="hybrid",
-        help="Use none for plain offloading baseline or hybrid for redundancy.",
+        help="Use none for the single-copy baseline or hybrid for learned r=1/2/3.",
     )
     parser.add_argument(
         "--task-mode",
@@ -482,7 +488,7 @@ def main() -> None:
     parser.add_argument(
         "--resource-awareness",
         action="store_true",
-        help="Replace candidate link slots with live compute, queue, and deadline-feasibility features.",
+        help="Deprecated compatibility flag; Proposed always uses unified resource features.",
     )
     parser.add_argument(
         "--reward-profile",

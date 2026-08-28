@@ -82,6 +82,14 @@ class ExecutionRecord:
     cancellation_energy_saved_j: float = 0.0
     replica_cancelled: bool = False
     cancellation_stage: str | None = None
+    replica_index: int = 0
+    requested_replica_count: int = 1
+    admitted_replica_count: int = 1
+    capacity_rejected_replica_count: int = 0
+    replica_target_node_ids: tuple[str, ...] = ()
+    winner_replica_index: int | None = None
+    capacity_rejected: bool = False
+    energy_rejected: bool = False
     redundancy_requested: bool = False
     is_redundant_task: bool = False
     replica_role: str = "primary"

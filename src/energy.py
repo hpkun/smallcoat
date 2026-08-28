@@ -11,6 +11,8 @@ class EnergyConfig:
     """各类计算节点的有效开关电容系数，单位由 ``kappa * f^2 * C`` 决定。"""
 
     # 等效能耗频率与节点的聚合计算吞吐量分离。
+    # These are independent knobs even though neutral defaults are equal.
+    # Formal experiments should override them with cited layer-specific values.
     uav_energy_clock_hz: float = 10e9
     bs_energy_clock_hz: float = 10e9
     leo_energy_clock_hz: float = 10e9

@@ -55,10 +55,19 @@ class CandidateExecutionPlan:
 
 @dataclass(frozen=True)
 class OffloadingAction:
-    target_node_id: str
-    priority_eta: float
+    target_node_id: str | None = None
+    priority_eta: float = 0.5
     redundancy_eta: float = 0.0
     backup_target_node_id: str | None = None
+    replica_count: int | None = None
+    replica_target_node_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        count = self.replica_count
+        if count is not None and not 1 <= count <= 3:
+            raise ValueError("replica_count must be in [1, 3].")
+        if len(set(self.replica_target_node_ids)) != len(self.replica_target_node_ids):
+            raise ValueError("replica_target_node_ids must be distinct.")
 
 
 @dataclass(frozen=True)
@@ -72,6 +81,9 @@ class PlannedTaskAssignment:
     replica_role: str = "primary"
     primary_target_node_id: str | None = None
     backup_target_node_id: str | None = None
+    replica_index: int = 0
+    requested_replica_count: int = 1
+    replica_target_node_ids: tuple[str, ...] = ()
 
 
 class SAGINEnvironment:
@@ -133,6 +145,19 @@ class SAGINEnvironment:
             if node.node_id == node_id:
                 return node
         raise ValueError(f"Unknown compute node id: {node_id}")
+
+    def link_profile_for_target(
+        self,
+        ingress_uav: UAV,
+        target_node: UAV | BaseStation | LEOSatellite,
+    ):
+        if target_node.node_id == ingress_uav.node_id:
+            return None
+        if isinstance(target_node, LEOSatellite):
+            return self.network_profiles.uav_to_leo
+        if isinstance(target_node, UAV):
+            return self.network_profiles.peer_uav_profile()
+        return self.network_profiles.uav_to_bs
 
     def reset_batteries(self) -> None:
         for uav in self.uavs:
@@ -239,7 +264,9 @@ class SAGINEnvironment:
                         actual_total_energy_j if record.replica_role == "primary" else 0.0
                     ),
                     backup_replica_energy_j=(
-                        actual_total_energy_j if record.replica_role == "backup" else 0.0
+                        actual_total_energy_j
+                        if record.replica_role.startswith("backup")
+                        else 0.0
                     ),
                     cancellation_time_s=cancellation_time_s,
                     cancelled_replica_count=1,
@@ -295,11 +322,9 @@ class SAGINEnvironment:
             transmission_failure_rate = 0.0
             arrival_at_target_s = arrival_at_uav_s
         else:
-            backhaul_profile = (
-                self.network_profiles.uav_to_leo
-                if isinstance(target_node, LEOSatellite)
-                else self.network_profiles.uav_to_bs
-            )
+            backhaul_profile = self.link_profile_for_target(ingress_uav, target_node)
+            if backhaul_profile is None:
+                raise RuntimeError("A remote target requires a link profile.")
             transmission_failure_rate = backhaul_profile.transmission_failure_rate
             backhaul_tx_s, backhaul_prop_s = self.communication_model.total_link_delay_s(
                 data_size_bits=task.input_size_bits,
@@ -535,6 +560,17 @@ class SAGINEnvironment:
     ) -> Iterable[UAV | BaseStation | LEOSatellite]:
         if ingress_uav.can_serve:
             yield ingress_uav
+        radius_m = None
+        if self.clustering_manager is not None:
+            radius_m = self.clustering_manager.config.communication_radius_m
+        elif self.simulation_config is not None:
+            radius_m = self.simulation_config.clustering.communication_radius_m
+        for peer_uav in self.uavs:
+            if peer_uav.node_id == ingress_uav.node_id or not peer_uav.can_serve:
+                continue
+            if radius_m is not None and peer_uav.position.distance_to(ingress_uav.position) > radius_m:
+                continue
+            yield peer_uav
         if self.clustering_manager is None:
             for bs in self.base_stations:
                 yield bs
@@ -558,6 +594,9 @@ class SAGINEnvironment:
         replica_role: str = "primary",
         primary_target_node_id: str | None = None,
         backup_target_node_id: str | None = None,
+        replica_index: int = 0,
+        requested_replica_count: int = 1,
+        replica_target_node_ids: tuple[str, ...] = (),
     ) -> ExecutionRecord:
         start_compute_s, finish_time_s, queue_delay_s, compute_delay_s = target_node.commit_task(
             task=task_instance.task,
@@ -611,13 +650,7 @@ class SAGINEnvironment:
             if constraint_check.feasible and not failed_due_to_reliability
             else 0.0
         )
-        backhaul_profile = None
-        if target_node.node_id != ingress_uav.node_id:
-            backhaul_profile = (
-                self.network_profiles.uav_to_leo
-                if isinstance(target_node, LEOSatellite)
-                else self.network_profiles.uav_to_bs
-            )
+        backhaul_profile = self.link_profile_for_target(ingress_uav, target_node)
         # 能耗只统计真正提交执行的任务；传播时延不产生发射能耗。
         energy = self.energy_model.compute(
             task=task_instance.task,
@@ -659,10 +692,14 @@ class SAGINEnvironment:
                 energy.total_energy_j if replica_role == "primary" else 0.0
             ),
             backup_replica_energy_j=(
-                energy.total_energy_j if replica_role == "backup" else 0.0
+                energy.total_energy_j if replica_role.startswith("backup") else 0.0
             ),
+            replica_index=replica_index,
+            requested_replica_count=requested_replica_count,
+            admitted_replica_count=1,
+            replica_target_node_ids=replica_target_node_ids,
             redundancy_requested=redundancy_requested,
-            is_redundant_task=backup_target_node_id is not None,
+            is_redundant_task=requested_replica_count > 1,
             replica_role=replica_role,
             primary_target_node_id=primary_target_node_id,
             backup_target_node_id=backup_target_node_id,
@@ -723,8 +760,14 @@ class SAGINEnvironment:
             actual_finish_delay_s=plan.actual_finish_delay_s,
             completed_before_deadline=False,
             realized_profit=0.0,
+            replica_index=assignment.replica_index,
+            requested_replica_count=assignment.requested_replica_count,
+            admitted_replica_count=0,
+            capacity_rejected_replica_count=1,
+            replica_target_node_ids=assignment.replica_target_node_ids,
+            capacity_rejected=True,
             redundancy_requested=assignment.redundancy_requested,
-            is_redundant_task=assignment.backup_target_node_id is not None,
+            is_redundant_task=assignment.requested_replica_count > 1,
             replica_role=assignment.replica_role,
             primary_target_node_id=assignment.primary_target_node_id,
             backup_target_node_id=assignment.backup_target_node_id,
@@ -745,6 +788,52 @@ class SAGINEnvironment:
             predecessor_task_ids=assignment.task_instance.predecessor_task_ids,
             successor_task_ids=assignment.task_instance.successor_task_ids,
             constraint_check=rejected_constraint,
+        )
+
+    def build_energy_rejection_record(
+        self,
+        assignment: PlannedTaskAssignment,
+    ) -> ExecutionRecord:
+        record = self.build_capacity_rejection_record(assignment)
+        if record.constraint_check is None:
+            raise RuntimeError("An admission rejection must include constraint results.")
+        return replace(
+            record,
+            capacity_rejected=False,
+            energy_rejected=True,
+            capacity_rejected_replica_count=0,
+            constraint_check=replace(
+                record.constraint_check,
+                satisfies_capacity=True,
+                satisfies_energy=False,
+            ),
+        )
+
+    def assignment_has_safe_energy(self, assignment: PlannedTaskAssignment) -> bool:
+        """Reject a UAV placement before it crosses any battery safety floor."""
+
+        profile = self.link_profile_for_target(
+            assignment.ingress_uav,
+            assignment.target_node,
+        )
+        energy = self.energy_model.compute(
+            task=assignment.task_instance.task,
+            node_type=assignment.target_node.node_type,
+            backhaul_transmission_delay_s=assignment.plan.backhaul_transmission_delay_s,
+            backhaul_profile=profile,
+        )
+        required_by_uav: dict[str, float] = {
+            assignment.ingress_uav.node_id: energy.transmission_energy_j
+        }
+        if isinstance(assignment.target_node, UAV):
+            required_by_uav[assignment.target_node.node_id] = (
+                required_by_uav.get(assignment.target_node.node_id, 0.0)
+                + energy.computing_energy_j
+            )
+        return all(
+            self.get_uav_by_id(uav_id).remaining_energy_j - required_energy_j
+            >= self.get_uav_by_id(uav_id).safe_energy_j
+            for uav_id, required_energy_j in required_by_uav.items()
         )
 
     def queue_has_capacity(
@@ -772,9 +861,6 @@ class SAGINEnvironment:
         workload_limit_s = self.simulation_config.queue_capacity.limit_for(
             assignment.target_node.node_type
         )
-        if assignment.replica_role == "backup":
-            workload_limit_s *= 1.0 - self.backup_capacity_reserve_ratio
-
         # 只有加入新任务后的总工作量不超过该层有限缓冲阈值时才允许入队；
         # 超过阈值的任务副本会被标记为容量丢弃。
         return queued_workload_s + service_time_s <= workload_limit_s
@@ -919,85 +1005,101 @@ class SAGINEnvironment:
             ingress_uav = self.get_uav_by_id(task_instance.ingress_uav_id)
             decision_uav = self.get_decision_uav(ingress_uav)
             action = actions_by_task_id.get(task_instance.task_id) if actions_by_task_id else None
-            if actions_by_task_id and task_instance.task_id in actions_by_task_id:
-                plan, target_node = self.select_plan_from_action(
-                    task_instance=task_instance,
-                    ingress_uav=ingress_uav,
-                    decision_uav=decision_uav,
-                    current_time_s=current_time_s,
-                    action=actions_by_task_id[task_instance.task_id],
-                    delay_sensitivity_lambda=delay_sensitivity_lambda,
-                )
-            else:
-                plan, target_node = self.select_best_plan(
-                    task_instance=task_instance,
-                    ingress_uav=ingress_uav,
-                    decision_uav=decision_uav,
-                    current_time_s=current_time_s,
-                    delay_sensitivity_lambda=delay_sensitivity_lambda,
-                )
 
-            redundancy_requested = (
-                action is not None and self.should_redundantly_offload(action, plan)
-            )
-            backup_target_node = (
-                self.resolve_backup_target(
-                    action=action,
-                    primary_target_node=target_node,
-                    decision_uav=decision_uav,
-                    ingress_uav=ingress_uav,
-                )
-                if redundancy_requested
-                else None
-            )
-            primary_target_node_id = target_node.node_id
-            backup_target_node_id = (
-                backup_target_node.node_id
-                if backup_target_node is not None
-                and backup_target_node.node_id != primary_target_node_id
-                else None
-            )
-            assignments.append(
-                PlannedTaskAssignment(
+            if action is None:
+                primary_plan, primary_target = self.select_best_plan(
                     task_instance=task_instance,
                     ingress_uav=ingress_uav,
                     decision_uav=decision_uav,
-                    target_node=target_node,
-                    plan=plan,
-                    redundancy_requested=redundancy_requested,
-                    replica_role="primary",
-                    primary_target_node_id=primary_target_node_id,
-                    backup_target_node_id=backup_target_node_id,
-                )
-            )
-            if backup_target_node is not None and backup_target_node_id is not None:
-                backup_plan = self.build_candidate_plan(
-                    task_instance=task_instance,
-                    ingress_uav=ingress_uav,
-                    decision_uav=decision_uav,
-                    target_node=backup_target_node,
                     current_time_s=current_time_s,
-                    priority_eta=action.priority_eta,
                     delay_sensitivity_lambda=delay_sensitivity_lambda,
                 )
+                target_nodes = [primary_target]
+                plans = [primary_plan]
+                requested_replica_count = 1
+            elif action.replica_target_node_ids:
+                requested_replica_count = action.replica_count or len(action.replica_target_node_ids)
+                target_nodes = [
+                    self.get_target_by_id(decision_uav, ingress_uav, target_node_id)
+                    for target_node_id in action.replica_target_node_ids[:3]
+                ]
+                plans = [
+                    self.build_candidate_plan(
+                        task_instance=task_instance,
+                        ingress_uav=ingress_uav,
+                        decision_uav=decision_uav,
+                        target_node=target_node,
+                        current_time_s=current_time_s,
+                        priority_eta=action.priority_eta,
+                        delay_sensitivity_lambda=delay_sensitivity_lambda,
+                    )
+                    for target_node in target_nodes
+                ]
+            else:
+                primary_plan, primary_target = self.select_plan_from_action(
+                    task_instance=task_instance,
+                    ingress_uav=ingress_uav,
+                    decision_uav=decision_uav,
+                    current_time_s=current_time_s,
+                    action=action,
+                    delay_sensitivity_lambda=delay_sensitivity_lambda,
+                )
+                target_nodes = [primary_target]
+                plans = [primary_plan]
+                if self.should_redundantly_offload(action, primary_plan):
+                    legacy_backup = self.resolve_backup_target(
+                        action,
+                        primary_target,
+                        decision_uav,
+                        ingress_uav,
+                    )
+                    if legacy_backup is not None:
+                        target_nodes.append(legacy_backup)
+                        plans.append(
+                            self.build_candidate_plan(
+                                task_instance=task_instance,
+                                ingress_uav=ingress_uav,
+                                decision_uav=decision_uav,
+                                target_node=legacy_backup,
+                                current_time_s=current_time_s,
+                                priority_eta=action.priority_eta,
+                                delay_sensitivity_lambda=delay_sensitivity_lambda,
+                            )
+                        )
+                requested_replica_count = len(target_nodes)
+
+            target_ids = tuple(target_node.node_id for target_node in target_nodes)
+            if len(set(target_ids)) != len(target_ids):
+                raise ValueError("A task action selected the same node for multiple replicas.")
+            primary_target_node_id = target_ids[0]
+            legacy_backup_target_node_id = target_ids[1] if len(target_ids) > 1 else None
+            for replica_index, (target_node, plan) in enumerate(zip(target_nodes, plans)):
+                legacy_action = action is not None and not action.replica_target_node_ids
                 assignments.append(
                     PlannedTaskAssignment(
                         task_instance=task_instance,
                         ingress_uav=ingress_uav,
                         decision_uav=decision_uav,
-                        target_node=backup_target_node,
-                        plan=backup_plan,
-                        redundancy_requested=redundancy_requested,
-                        replica_role="backup",
+                        target_node=target_node,
+                        plan=plan,
+                        redundancy_requested=requested_replica_count > 1,
+                        replica_role=(
+                            "primary"
+                            if replica_index == 0
+                            else ("backup" if legacy_action else f"backup-{replica_index}")
+                        ),
                         primary_target_node_id=primary_target_node_id,
-                        backup_target_node_id=backup_target_node_id,
+                        backup_target_node_id=legacy_backup_target_node_id,
+                        replica_index=replica_index,
+                        requested_replica_count=requested_replica_count,
+                        replica_target_node_ids=target_ids,
                     )
                 )
 
         ordered_assignments = sorted(
             assignments,
             key=lambda assignment: (
-                assignment.replica_role == "backup",
+                assignment.replica_index,
                 -assignment.plan.compute_priority_eta,
                 assignment.task_instance.created_at_s,
                 assignment.task_instance.task_id,
@@ -1006,16 +1108,19 @@ class SAGINEnvironment:
         records_by_task_id: dict[str, list[ExecutionRecord]] = {}
         for assignment in ordered_assignments:
             if assignment.replica_role == "backup":
-                assignment = self.select_admissible_backup_assignment(
+                legacy_assignment = self.select_admissible_backup_assignment(
                     assignment,
                     current_time_s,
                     delay_sensitivity_lambda,
                 )
-                # A backup admission miss must not turn a valid primary task
-                # into a capacity drop. It remains a normal single-copy task.
-                if assignment is None:
+                if legacy_assignment is None:
                     continue
-            if self.queue_has_capacity(assignment, current_time_s):
+                assignment = legacy_assignment
+            if not self.assignment_has_safe_energy(assignment):
+                record = self.build_energy_rejection_record(assignment)
+            elif not self.queue_has_capacity(assignment, current_time_s):
+                record = self.build_capacity_rejection_record(assignment)
+            else:
                 record = self.commit_plan(
                     task_instance=assignment.task_instance,
                     ingress_uav=assignment.ingress_uav,
@@ -1028,9 +1133,10 @@ class SAGINEnvironment:
                     replica_role=assignment.replica_role,
                     primary_target_node_id=assignment.primary_target_node_id,
                     backup_target_node_id=assignment.backup_target_node_id,
+                    replica_index=assignment.replica_index,
+                    requested_replica_count=assignment.requested_replica_count,
+                    replica_target_node_ids=assignment.replica_target_node_ids,
                 )
-            else:
-                record = self.build_capacity_rejection_record(assignment)
             records_by_task_id.setdefault(record.task_id, []).append(record)
 
         records: list[ExecutionRecord] = []
@@ -1039,90 +1145,104 @@ class SAGINEnvironment:
             replica_records = records_by_task_id.get(task_instance.task_id, [])
             if not replica_records:
                 continue
-            admitted_backups = [
-                record for record in replica_records if record.replica_role == "backup"
-            ]
-            actual_backup_target_node_id = (
-                admitted_backups[0].target_node_id if admitted_backups else None
-            )
-            replica_records = [
-                replace(
-                    record,
-                    is_redundant_task=actual_backup_target_node_id is not None,
-                    backup_target_node_id=actual_backup_target_node_id,
-                )
-                for record in replica_records
-            ]
-            successful_records = [
+            admitted_records = [
                 record
                 for record in replica_records
-                if record.completed_before_deadline
-                and record.constraint_check is not None
+                if record.constraint_check is not None
                 and record.constraint_check.satisfies_capacity
-                and not record.failed_due_to_reliability
+                and record.constraint_check.satisfies_energy
             ]
-            replica_records, winner, task_cancellation_events = self.cancel_later_replicas(
-                replica_records,
+            rejected_records = [record for record in replica_records if record not in admitted_records]
+            successful_records = [
+                record
+                for record in admitted_records
+                if record.completed_before_deadline and not record.failed_due_to_reliability
+            ]
+            admitted_records, winner, task_cancellation_events = self.cancel_later_replicas(
+                admitted_records,
                 successful_records,
             )
             cancellation_events.extend(task_cancellation_events)
-            redundancy_requested = any(
-                record.redundancy_requested for record in replica_records
+            replica_records = sorted(
+                [*admitted_records, *rejected_records],
+                key=lambda record: record.replica_index,
             )
-            backup_succeeded = any(
-                record.replica_role == "backup"
-                and record.completed_before_deadline
-                and not record.replica_cancelled
-                and record.constraint_check is not None
-                and record.constraint_check.satisfies_capacity
-                and not record.failed_due_to_reliability
-                for record in replica_records
+            admitted_replica_count = len(admitted_records)
+            capacity_rejected_replica_count = sum(
+                int(record.capacity_rejected) for record in replica_records
             )
+            requested_replica_count = replica_records[0].requested_replica_count
+            winner_replica_index = winner.replica_index if winner is not None else None
             selected_record = (
-                winner
-                if winner is not None
+                next(
+                    record
+                    for record in admitted_records
+                    if record.replica_index == winner_replica_index
+                )
+                if winner_replica_index is not None
                 else min(replica_records, key=lambda record: record.actual_finish_delay_s)
             )
-            is_redundant_task = any(record.is_redundant_task for record in replica_records)
+            backup_succeeded = any(
+                record.replica_role.startswith("backup")
+                and record.completed_before_deadline
+                and not record.replica_cancelled
+                and not record.failed_due_to_reliability
+                for record in admitted_records
+            )
+            actual_backup_target_node_id = next(
+                (
+                    record.target_node_id
+                    for record in admitted_records
+                    if record.replica_index == 1
+                ),
+                None,
+            )
             failure_probability_product = 1.0
-            for record in replica_records:
-                failure_probability_product *= 1.0 - min(max(record.end_to_end_reliability, 0.0), 1.0)
-            combined_reliability = float(1.0 - failure_probability_product)
+            for record in admitted_records:
+                reliability = min(max(record.end_to_end_reliability, 0.0), 1.0)
+                failure_probability_product *= 1.0 - reliability
+            combined_reliability = (
+                float(1.0 - failure_probability_product) if admitted_records else 0.0
+            )
             expected_reliability = float(task_instance.task.expected_reliability)
             satisfies_reliability = combined_reliability >= expected_reliability
-            redundancy_succeeded = is_redundant_task and bool(successful_records)
-            any_execution_failed = any(record.execution_failed for record in replica_records)
-            any_transmission_failed = any(record.transmission_failed for record in replica_records)
+            is_redundant_task = admitted_replica_count > 1
             task_failed_due_to_reliability = not bool(successful_records) and any(
-                record.failed_due_to_reliability for record in replica_records
+                record.failed_due_to_reliability for record in admitted_records
             )
+            selected_constraint = selected_record.constraint_check
+            if selected_constraint is not None:
+                selected_constraint = replace(
+                    selected_constraint,
+                    satisfies_capacity=admitted_replica_count > 0,
+                    satisfies_energy=admitted_replica_count > 0,
+                )
             records.append(
                 replace(
                     selected_record,
-                    realized_profit=(
-                        selected_record.realized_profit
-                        if selected_record in successful_records
-                        else 0.0
-                    ),
+                    realized_profit=(selected_record.realized_profit if winner is not None else 0.0),
                     completed_before_deadline=bool(successful_records),
-                    redundancy_requested=redundancy_requested,
+                    requested_replica_count=requested_replica_count,
+                    admitted_replica_count=admitted_replica_count,
+                    capacity_rejected_replica_count=capacity_rejected_replica_count,
+                    replica_target_node_ids=replica_records[0].replica_target_node_ids,
+                    backup_target_node_id=actual_backup_target_node_id,
+                    winner_replica_index=winner_replica_index,
+                    capacity_rejected=capacity_rejected_replica_count > 0,
+                    energy_rejected=any(record.energy_rejected for record in replica_records),
+                    redundancy_requested=requested_replica_count > 1,
                     is_redundant_task=is_redundant_task,
                     backup_succeeded=backup_succeeded,
-                    redundancy_succeeded=redundancy_succeeded,
+                    redundancy_succeeded=is_redundant_task and bool(successful_records),
                     selected_replica_role=selected_record.replica_role,
                     end_to_end_reliability=combined_reliability,
                     expected_reliability=expected_reliability,
                     satisfies_reliability=satisfies_reliability,
-                    execution_failed=any_execution_failed,
-                    transmission_failed=any_transmission_failed,
+                    execution_failed=any(record.execution_failed for record in admitted_records),
+                    transmission_failed=any(record.transmission_failed for record in admitted_records),
                     failed_due_to_reliability=task_failed_due_to_reliability,
-                    # 冗余任务的系统能耗必须包含所有已执行副本，而非只算胜出副本。
-                    transmission_energy_j=sum(
-                        record.transmission_energy_j for record in replica_records
-                    ),
-                    computing_energy_j=sum(
-                        record.computing_energy_j for record in replica_records
-                    ),
+                    transmission_energy_j=sum(record.transmission_energy_j for record in replica_records),
+                    computing_energy_j=sum(record.computing_energy_j for record in replica_records),
                     total_energy_j=sum(record.total_energy_j for record in replica_records),
                     primary_replica_energy_j=sum(
                         record.total_energy_j
@@ -1132,20 +1252,21 @@ class SAGINEnvironment:
                     backup_replica_energy_j=sum(
                         record.total_energy_j
                         for record in replica_records
-                        if record.replica_role == "backup"
+                        if record.replica_role.startswith("backup")
                     ),
                     cancellation_time_s=(
                         winner.finish_time_s
                         if winner is not None
-                        and any(record.replica_cancelled for record in replica_records)
+                        and any(record.replica_cancelled for record in admitted_records)
                         else None
                     ),
                     cancelled_replica_count=sum(
-                        int(record.replica_cancelled) for record in replica_records
+                        int(record.replica_cancelled) for record in admitted_records
                     ),
                     cancellation_energy_saved_j=sum(
-                        record.cancellation_energy_saved_j for record in replica_records
+                        record.cancellation_energy_saved_j for record in admitted_records
                     ),
+                    constraint_check=selected_constraint,
                 )
             )
 

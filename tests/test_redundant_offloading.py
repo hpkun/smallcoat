@@ -387,13 +387,13 @@ def test_redundancy_succeeds_when_backup_survives_primary_failure() -> None:
     assert records[0].redundancy_succeeded
 
 
-def test_congested_requested_backup_falls_back_to_available_layer() -> None:
+def test_congested_proposed_replica_is_not_silently_rerouted() -> None:
     env = _env()
     env.uavs[0].execution_failure_rate = 1_000_000.0
     env.base_stations[0].queue_manager.commit(
         task_id="busy-bs",
         arrival_time_s=0.0,
-        service_time_s=0.13,
+        service_time_s=0.15,
         priority_eta=1.0,
         current_time_s=0.0,
     )
@@ -403,22 +403,21 @@ def test_congested_requested_backup_falls_back_to_available_layer() -> None:
         current_time_s=0.0,
         actions_by_task_id={
             "task-0": OffloadingAction(
-                target_node_id="uav-0",
-                backup_target_node_id="bs-0",
                 priority_eta=0.9,
-                redundancy_eta=0.9,
+                replica_count=2,
+                replica_target_node_ids=("uav-0", "bs-0"),
             ),
         },
         external_tasks=[_task("task-0")],
         apply_pre_step_dynamics=False,
     )
 
-    assert records[0].is_redundant_task
     assert records[0].redundancy_requested
-    assert records[0].backup_target_node_id == "leo-0"
-    assert records[0].selected_replica_role == "backup"
-    assert records[0].completed_before_deadline
-    assert records[0].backup_succeeded
+    assert records[0].replica_target_node_ids == ("uav-0", "bs-0")
+    assert records[0].backup_target_node_id is None
+    assert records[0].capacity_rejected_replica_count == 1
+    assert records[0].admitted_replica_count == 1
+    assert not records[0].backup_succeeded
 
 
 def test_unavailable_backup_capacity_keeps_primary_as_single_copy() -> None:

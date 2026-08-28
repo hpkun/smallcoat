@@ -43,6 +43,12 @@ class NetworkProfiles:
     ground_to_uav: LinkProfile
     uav_to_bs: LinkProfile
     uav_to_leo: LinkProfile
+    uav_to_uav: LinkProfile | None = None
+
+    def peer_uav_profile(self) -> LinkProfile:
+        """Return the explicit air-to-air profile, with a legacy fallback."""
+
+        return self.uav_to_uav or self.uav_to_bs
 
 
 class CommunicationModel:

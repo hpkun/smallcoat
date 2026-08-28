@@ -176,6 +176,7 @@ class CMADDPGTrainer:
                 # 当前 step 的任务执行记录，是完成率、超时率、冗余率等指标的来源。
                 records = info["records"]
                 total_tasks = len(records)
+                replica_metrics = self.env.extract_record_metrics(records)
                 # 能耗按所有实际执行任务累计，包含冗余副本和取消前的部分能耗。
                 step_transmission_energy_j = float(
                     sum(record.transmission_energy_j for record in records)
@@ -217,6 +218,45 @@ class CMADDPGTrainer:
                     cumulative_system_profit=training_cumulative_system_profit,
                     task_count=total_tasks,
                     completed_task_count=completed_tasks,
+                    avg_requested_replica_count=replica_metrics.get(
+                        "avg_requested_replica_count", 0.0
+                    ),
+                    replica_count_1_rate=replica_metrics.get("replica_count_1_rate", 0.0),
+                    replica_count_2_rate=replica_metrics.get("replica_count_2_rate", 0.0),
+                    replica_count_3_rate=replica_metrics.get("replica_count_3_rate", 0.0),
+                    avg_admitted_replica_count=replica_metrics.get(
+                        "avg_admitted_replica_count", 0.0
+                    ),
+                    capacity_rejected_replica_rate=replica_metrics.get(
+                        "capacity_rejected_replica_rate", 0.0
+                    ),
+                    uav_replica_share=replica_metrics.get("uav_replica_share", 0.0),
+                    bs_replica_share=replica_metrics.get("bs_replica_share", 0.0),
+                    leo_replica_share=replica_metrics.get("leo_replica_share", 0.0),
+                    same_layer_replica_rate=replica_metrics.get(
+                        "same_layer_replica_rate", 0.0
+                    ),
+                    cross_layer_replica_rate=replica_metrics.get(
+                        "cross_layer_replica_rate", 0.0
+                    ),
+                    reliable_on_time_completion_rate=replica_metrics.get(
+                        "reliable_on_time_completion_rate", 0.0
+                    ),
+                    energy_per_completed_task=replica_metrics.get(
+                        "energy_per_completed_task", 0.0
+                    ),
+                    cancellation_energy_saved_j=replica_metrics.get(
+                        "cancellation_energy_saved_j", 0.0
+                    ),
+                    avg_combined_reliability=replica_metrics.get(
+                        "avg_combined_reliability", 0.0
+                    ),
+                    energy_constraint_multiplier=info.get(
+                        "energy_constraint_multiplier", 0.0
+                    ),
+                    energy_budget_violation_j=info.get(
+                        "energy_budget_violation_j", 0.0
+                    ),
                     battery_status=battery_status,
                 )
                 uav_arrival_tasks = sum(1 for record in records if record.target_node_type == "uav")
@@ -229,10 +269,13 @@ class CMADDPGTrainer:
                     and not record.constraint_check.satisfies_deadline
                 )
                 capacity_drop_tasks = sum(
-                    1
+                    record.capacity_rejected_replica_count
+                    if record.capacity_rejected_replica_count > 0
+                    else int(
+                        record.constraint_check is not None
+                        and not record.constraint_check.satisfies_capacity
+                    )
                     for record in records
-                    if record.constraint_check is not None
-                    and not record.constraint_check.satisfies_capacity
                 )
                 redundancy_requested_tasks = sum(
                     1 for record in records if record.redundancy_requested
@@ -468,6 +511,42 @@ class CMADDPGTrainer:
                             system_transmission_energy_j=step_transmission_energy_j,
                             system_computing_energy_j=step_computing_energy_j,
                             system_total_energy_j=step_total_energy_j,
+                            avg_requested_replica_count=replica_metrics.get(
+                                "avg_requested_replica_count", 0.0
+                            ),
+                            replica_count_1_rate=replica_metrics.get("replica_count_1_rate", 0.0),
+                            replica_count_2_rate=replica_metrics.get("replica_count_2_rate", 0.0),
+                            replica_count_3_rate=replica_metrics.get("replica_count_3_rate", 0.0),
+                            avg_admitted_replica_count=replica_metrics.get(
+                                "avg_admitted_replica_count", 0.0
+                            ),
+                            capacity_rejected_replica_rate=replica_metrics.get(
+                                "capacity_rejected_replica_rate", 0.0
+                            ),
+                            uav_replica_share=replica_metrics.get("uav_replica_share", 0.0),
+                            bs_replica_share=replica_metrics.get("bs_replica_share", 0.0),
+                            leo_replica_share=replica_metrics.get("leo_replica_share", 0.0),
+                            same_layer_replica_rate=replica_metrics.get(
+                                "same_layer_replica_rate", 0.0
+                            ),
+                            cross_layer_replica_rate=replica_metrics.get(
+                                "cross_layer_replica_rate", 0.0
+                            ),
+                            energy_per_completed_task=replica_metrics.get(
+                                "energy_per_completed_task", 0.0
+                            ),
+                            cancellation_energy_saved_j=replica_metrics.get(
+                                "cancellation_energy_saved_j", 0.0
+                            ),
+                            avg_combined_reliability=replica_metrics.get(
+                                "avg_combined_reliability", 0.0
+                            ),
+                            energy_constraint_multiplier=info.get(
+                                "energy_constraint_multiplier", 0.0
+                            ),
+                            energy_budget_violation_j=info.get(
+                                "energy_budget_violation_j", 0.0
+                            ),
                             task_completion_rate=completion_rate,
                             task_timeout_or_drop_rate=timeout_or_drop_rate,
                             task_deadline_failure_rate=deadline_failure_rate,

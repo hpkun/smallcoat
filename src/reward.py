@@ -17,6 +17,7 @@ class RewardBreakdown:
     system_profit: float
     energy_penalty: float
     completion_constraint_penalty: float = 0.0
+    energy_budget_constraint_penalty: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,10 @@ class RewardConfig:
     completion_rate_ema_alpha: float = 0.05
     completion_constraint_dual_lr: float = 0.01
     completion_constraint_dual_max: float = 1.0
+    long_term_energy_budget_j_per_step: float | None = 1_000.0
+    energy_budget_ema_alpha: float = 0.05
+    energy_constraint_dual_lr: float = 0.01
+    energy_constraint_dual_max: float = 1.0
     advantage_reward_weight: float = 0.5
     advantage_reward_clip: float | None = 0.05
     profit_baseline_ema_alpha: float = 0.05
@@ -61,6 +66,19 @@ class SharedRewardCalculator:
         self._profit_reward_baseline: float | None = None
         self._completion_rate_ema: float | None = None
         self._completion_constraint_multiplier = 0.0
+        self._energy_ema_j: float | None = None
+        self._energy_constraint_multiplier = 0.0
+
+    @property
+    def energy_constraint_multiplier(self) -> float:
+        return float(self._energy_constraint_multiplier)
+
+    @property
+    def energy_budget_violation_j(self) -> float:
+        budget = self.config.long_term_energy_budget_j_per_step
+        if budget is None or self._energy_ema_j is None:
+            return 0.0
+        return float(max(0.0, self._energy_ema_j - budget))
 
     def _normalize_reward(self, profit: float) -> float:
         scale = self.config.normalize_profit_scale
@@ -139,6 +157,38 @@ class SharedRewardCalculator:
         )
         return float(self._completion_constraint_multiplier * max(0.0, violation))
 
+    def _energy_budget_constraint_penalty(self, energy_j: float) -> float:
+        """Update the long-term energy dual and return lambda_E * g_E."""
+
+        budget = self.config.long_term_energy_budget_j_per_step
+        if budget is None:
+            return 0.0
+        alpha = self.config.energy_budget_ema_alpha
+        dual_lr = self.config.energy_constraint_dual_lr
+        dual_max = self.config.energy_constraint_dual_max
+        if budget < 0.0:
+            raise ValueError("long_term_energy_budget_j_per_step must be non-negative.")
+        if not 0.0 < alpha <= 1.0:
+            raise ValueError("energy_budget_ema_alpha must be in (0, 1].")
+        if dual_lr < 0.0 or dual_max < 0.0:
+            raise ValueError("Energy constraint dual parameters must be non-negative.")
+        previous = self._energy_ema_j
+        self._energy_ema_j = (
+            energy_j
+            if previous is None
+            else (1.0 - alpha) * previous + alpha * energy_j
+        )
+        normalized_violation = (
+            self._energy_ema_j - budget
+        ) / self.config.normalize_energy_j
+        self._energy_constraint_multiplier = min(
+            dual_max,
+            max(0.0, self._energy_constraint_multiplier + dual_lr * normalized_violation),
+        )
+        return float(
+            self._energy_constraint_multiplier * max(0.0, normalized_violation)
+        )
+
     def compute(self, record: ExecutionRecord) -> RewardBreakdown:
         """为单条执行记录返回其对应收益项。"""
 
@@ -157,7 +207,7 @@ class SharedRewardCalculator:
         objective = compute_equation_8_objective(records)
         profit_reward = self._normalize_reward(objective.total_profit)
         if not records:
-            return profit_reward
+            return profit_reward - self._energy_budget_constraint_penalty(0.0)
         reward = profit_reward + self._profit_advantage_bonus(profit_reward)
 
         deadline_failure_rate = sum(
@@ -166,12 +216,18 @@ class SharedRewardCalculator:
             if record.constraint_check is not None
             and not record.constraint_check.satisfies_deadline
         ) / len(records)
+        requested_replica_count = sum(
+            max(record.requested_replica_count, 1) for record in records
+        )
         capacity_drop_rate = sum(
-            1.0
+            record.capacity_rejected_replica_count
+            if record.capacity_rejected_replica_count > 0
+            else float(
+                record.constraint_check is not None
+                and not record.constraint_check.satisfies_capacity
+            )
             for record in records
-            if record.constraint_check is not None
-            and not record.constraint_check.satisfies_capacity
-        ) / len(records)
+        ) / requested_replica_count
         reliability_failure_rate = sum(
             1.0
             for record in records
@@ -194,6 +250,7 @@ class SharedRewardCalculator:
         reward -= self.config.completion_delay_penalty * avg_completion_delay_s
         # 成功任务总收益与系统总能耗成本逐时隙对应，形成可靠净收益。
         reward -= self._energy_penalty(objective.total_energy_j)
+        reward -= self._energy_budget_constraint_penalty(objective.total_energy_j)
         # 完成率通过长期约束的对偶变量处理，不再作为固定权重奖励项重复计算。
         reward -= self._completion_constraint_penalty(objective.completion_rate)
 

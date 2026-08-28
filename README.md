@@ -4,14 +4,14 @@
 
 ## 项目目标
 
-本项目围绕论文式的多 UAV 协同任务卸载问题构建可运行仿真环境，并用 CMADDPG 学习簇头 CH 的卸载决策。每个 CH agent 根据局部观测，为一个或多个任务槽位选择计算目标，并输出任务优先级和冗余卸载强度。
+本项目围绕动态异构 SAGIN 的可靠冗余任务卸载构建可运行仿真环境，并用 CMADDPG 学习簇头 CH 的联合决策。每个 CH agent 根据局部观测，为一个或多个任务显式选择总副本数、最多三个互异执行节点和调度优先级。
 
 核心问题包括：
 
 - UAV 动态移动和 KMDUC 聚类维护
 - 地面任务到达、UAV 接入、CH 决策和多层计算节点执行
 - UAV / BS / LEO 三层候选计算资源选择
-- deadline、capacity、reliability 等约束下的收益最大化
+- deadline、capacity、reliability、UAV 电量和长期能耗预算约束下的收益最大化
 - 混合动作空间中的离散卸载目标与连续控制变量联合学习
 - workflow DAG 任务依赖、ready task 释放和工作流 SLA 统计
 - 传输、计算、冗余副本与提前取消过程的实际能耗统计
@@ -23,9 +23,9 @@
 1. UAV 根据速度和航向更新位置，KMDUC 维护簇成员与簇头。
 2. 独立任务按泊松过程到达；workflow 模式则按 DAG 依赖释放 ready tasks。
 3. 普通成员 UAV 的任务汇聚到所属 CH，CH 或孤立 UAV 作为决策 agent。
-4. Actor 为每个任务槽位输出卸载目标、计算优先级和冗余强度。
-5. 环境应用候选 mask，检查唯一卸载、deadline、capacity 和 reliability 约束。
-6. 任务在 UAV、BS 或 LEO 的非抢占式优先级队列中执行；冗余任务可提交主副本和备份副本。
+4. Actor 为每个任务输出 `r in {1,2,3}`、三个位置头和计算优先级。
+5. 环境应用物理可达、互异节点、服务状态和 UAV 能量 mask，并执行真实容量 admission。
+6. 1-3 个副本在 UAV、BS 或 LEO 的非抢占式优先级队列中并行执行。
 7. 首个成功副本完成后，尚未完成的副本按物理时间取消，并结算实际发生的能耗。
 8. 环境生成共享奖励、任务/工作流指标和联合经验，CMADDPG 更新 Actor 与 Critic。
 
@@ -250,120 +250,81 @@ examples/basic_simulation.py     基础环境仿真示例
 ```text
 node_load_vector: 6 维
 task_vector: 6 维
-link_feature_matrix: 11 个候选目标 * 3 维
+candidate_feature_matrix: 11 个候选目标 * 14 维
 ```
 
-Actor 观测中暂不使用工作流嵌入，所以每个槽位观测维度为：
+候选特征同时包含节点类型、算力、剩余容量、队列压力、链路速率、通信时延、传输/执行失效率、预计端到端可靠性、deadline slack、预计能耗和剩余电量。Proposed 不再在链路特征与资源特征之间二选一。
+
+每个任务的观测维度为：
 
 ```text
-6 + 6 + 11 * 3 = 45
+6 + 6 + 11 * 14 = 166
 ```
 
-每个 CH 最多 2 个任务槽位，因此单 agent 状态维度为：
-
-```text
-2 * 45 = 90
-```
+CH 采用 variable-task set 编码，agent 状态宽度为 `当前任务数 * 166`；任务数不再固定为 2。
 
 ### 动作
 
 每个任务槽位输出：
 
 ```text
-候选目标 logits + priority_eta + redundancy_eta
+replica_count_logits[3]
+primary_logits[K]
+backup1_logits[K]
+backup2_logits[K]
+priority_eta[1]
 ```
 
-候选目标并集由所有 UAV、所有 BS 和 LEO 组成。默认 `training` 环境中：
+候选槽保持固定宽度 `K=11`，语义为：
 
 ```text
-K = 40 + 25 + 1 = 66
+1 Ingress UAV + 3 Peer UAV + 6 BS + 1 LEO
 ```
 
-所以每个槽位输出维度：
+每任务 Actor/Critic 动作宽度为：
 
 ```text
-66 + 2 = 68
+3 + 3K + 1 = 3K + 4 = 37
 ```
 
-每个 agent 两个槽位：
+`replica_count_logits` 经 argmax 得到总副本数 `r in {1,2,3}`。三个位置头依次在合法 mask 中 argmax，并排除前面已选节点；只执行前 `r` 个位置。环境不会根据可靠性或容量结果自动增加、删除或改派副本。
 
-```text
-2 * 68 = 136
-```
+### 执行与约束
 
-离散卸载目标通过 mask 后的 argmax 解码；`priority_eta` 和 `redundancy_eta` 经过 sigmoid 映射到 `(0, 1)`。
+- 所有有效副本并行进入各自链路和非抢占式优先级队列，最先在 deadline 前成功完成的副本成为 winner。
+- winner 完成后取消仍在传输、传播、排队或计算的副本，并按实际执行比例结算能耗。
+- 所有副本统一占用真实队列容量，不使用 backup 专用容量折扣；同一 step 的顺序 admission 会看到此前已提交副本的工作量。
+- UAV admission 前预测传输与计算能耗，执行后低于 `safe_energy_ratio` 时硬拒绝。
+- 共享奖励同时维护最低长期完成率和长期平均能耗预算的投影对偶变量。
 
 ### Critic
 
-Actor 使用局部观测，Critic 使用联合状态和联合动作：
+CMADDPG 使用 set-based centralized critic。每个任务 token 由一条 166 维状态和一条 37 维动作组成；Critic 中动作保持软概率形式：
 
 ```text
-critic_input_dim = sum(local_state_dim_i) + sum(local_action_dim_i)
-```
-
-在一次默认 `training` reset 中，当前聚类结构产生了 12 个决策 agent：
-
-```text
-joint_state_dim = 12 * 90 = 1080
-joint_action_dim = 12 * 136 = 1632
-critic_input_dim = 2712
-```
-
-这个数会随 CH 数量变化。如果所有 40 个 UAV 都成为决策 agent，联合 critic 输入最坏可到：
-
-```text
-40 * (90 + 136) = 9040
+replica_count_prob[3]
+primary_prob[11]
+backup1_prob[11]
+backup2_prob[11]
+priority_eta[1]
 ```
 
 ## 搜索空间与维度爆炸
 
-这个项目的搜索空间并不小。以默认 `training` 环境为例，单个 agent 有 2 个任务槽位，每个槽位有 66 个候选目标，仅离散目标组合就是：
+单任务的离散决策同时包含副本数和有序的互异位置。对 `K=11`，理论组合数为：
 
 ```text
-66^2 = 4356
+P(11,1) + P(11,2) + P(11,3) = 11 + 110 + 990 = 1111
 ```
 
-如果同时有 `M` 个决策 agent，离散联合目标组合约为：
-
-```text
-66^(2M)
-```
-
-当 `M = 12` 时：
-
-```text
-66^24 ≈ 10^43.7
-```
-
-这还没有计算 `priority_eta` 和 `redundancy_eta` 两个连续控制变量。因此如果采用枚举搜索，空间会迅速不可承受。
-
-本项目中的维度爆炸可以用下面的公式描述：
-
-```text
-D_critic = M * [D_state_per_agent + T * (K + 2)]
-```
-
-其中：
-
-- `M` 是当前决策 agent / CH 数量
-- `T` 是每个 CH 的任务槽位数，当前默认为 2
-- `K` 是候选计算目标数量，默认 training 环境为 66
-- `D_state_per_agent` 当前为 90
-
-也就是说：
-
-```text
-D_critic = M * [90 + 2 * (66 + 2)] = M * 226
-```
-
-项目通过以下方式控制搜索空间：
+项目通过以下方式控制计算规模：
 
 - KMDUC 聚类：只让 CH 或孤立 UAV 作为决策 agent
-- 任务槽位上限：每个 CH 最多同时决策 2 个任务
-- 固定候选目标并集和槽位级合法 mask
-- 链路特征截断到 9 条候选链路
+- variable-task set 编码：不依赖固定 agent/task 数量
+- 固定 11 个语义候选槽和槽位级合法 mask
+- 最大总副本数固定为 3
 - Actor 直接输出动作向量，避免枚举所有组合
-- Critic 集中式训练、Actor 分布式执行
+- set-based Critic 集中训练、Actor 分布式执行
 
 ## 论文变量说明
 

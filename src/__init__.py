@@ -1,6 +1,9 @@
 from .action_space import ActionSpec
 from .action_space import DecodedAction
 from .action_space import MixedActionCodec
+from .action_space import MAX_REPLICA_COUNT
+from .action_space import MultiTaskOffloadingAction
+from .action_space import SlotAction
 from .action_space import build_action_spec
 from .clustering import ClusterInfo
 from .clustering import KMDUCManager
@@ -20,6 +23,7 @@ from .constraints import check_equation_10_deadline
 from .constraints import check_equation_11_binary_action
 from .constraints import check_equation_12_capacity
 from .constraints import check_equation_9_unique_offload
+from .constraints import check_unique_replica_targets
 from .debug_tools import TaskLifecycleSummary
 from .debug_tools import format_execution_record_debug
 from .debug_tools import format_records_debug_report
@@ -113,12 +117,14 @@ __all__ = [
     "LEOSatellite",
     "LinkProfile",
     "MADDPGAgent",
+    "MAX_REPLICA_COUNT",
     "MLP",
     "MetricsLogger",
     "MixedActionCodec",
     "MobilityConfig",
     "MultiAgentReplayBuffer",
     "MultiAgentTransition",
+    "MultiTaskOffloadingAction",
     "NetworkProfiles",
     "ObjectiveBreakdown",
     "ObservationBuilder",
@@ -133,6 +139,7 @@ __all__ = [
     "ScenarioDefinition",
     "SharedRewardCalculator",
     "SimulationConfig",
+    "SlotAction",
     "SyntheticWorkflowGenerator",
     "Task",
     "TaskGenerator",
@@ -162,6 +169,7 @@ __all__ = [
     "check_equation_11_binary_action",
     "check_equation_12_capacity",
     "check_equation_9_unique_offload",
+    "check_unique_replica_targets",
     "compute_computing_delay",
     "compute_cycles_per_bit",
     "compute_equation_8_objective",

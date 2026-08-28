@@ -13,6 +13,7 @@ class ConstraintCheckResult:
     satisfies_deadline: bool
     satisfies_binary_action: bool
     satisfies_capacity: bool
+    satisfies_energy: bool = True
 
     @property
     def feasible(self) -> bool:
@@ -22,6 +23,7 @@ class ConstraintCheckResult:
             and self.satisfies_deadline
             and self.satisfies_binary_action
             and self.satisfies_capacity
+            and self.satisfies_energy
         )
 
 
@@ -51,6 +53,12 @@ class CapacitySnapshot:
 def check_equation_9_unique_offload(num_selected_targets: int) -> bool:
     """公式 (9): 每个任务只能卸载到一个目标。"""
     return num_selected_targets == 1
+
+
+def check_unique_replica_targets(target_node_ids: tuple[str, ...] | list[str]) -> bool:
+    """Every effective replica of one task must use a different node."""
+
+    return bool(target_node_ids) and len(target_node_ids) == len(set(target_node_ids))
 
 
 def check_equation_10_deadline(total_delay_s: float, task_instance: TaskInstance) -> bool:

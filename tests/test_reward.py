@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from src.constraints import ConstraintCheckResult
 from src.entities import ExecutionRecord
 from src.reward import RewardConfig
@@ -14,6 +16,8 @@ def _record(
     satisfies_capacity: bool = True,
     finish_delay_s: float = 1.0,
     total_energy_j: float = 0.0,
+    requested_replica_count: int = 1,
+    capacity_rejected_replica_count: int = 0,
 ) -> ExecutionRecord:
     return ExecutionRecord(
         task_id="task-0",
@@ -39,6 +43,8 @@ def _record(
         completed_before_deadline=completed,
         realized_profit=profit,
         total_energy_j=total_energy_j,
+        requested_replica_count=requested_replica_count,
+        capacity_rejected_replica_count=capacity_rejected_replica_count,
         constraint_check=ConstraintCheckResult(
             satisfies_unique_offload=True,
             satisfies_deadline=satisfies_deadline,
@@ -146,3 +152,54 @@ def test_completion_rate_is_enforced_as_adaptive_constraint_not_fixed_reward() -
 
     assert feasible_reward == 0.1
     assert violated_reward < 0.0
+
+
+def test_energy_budget_dual_rises_on_violation_and_never_goes_negative() -> None:
+    calculator = SharedRewardCalculator(
+        RewardConfig(
+            normalize_profit_scale=100.0,
+            normalize_energy_j=1.0,
+            energy_penalty_weight=0.0,
+            completion_delay_penalty=0.0,
+            advantage_reward_weight=0.0,
+            minimum_long_term_completion_rate=0.0,
+            long_term_energy_budget_j_per_step=1.0,
+            energy_budget_ema_alpha=1.0,
+            energy_constraint_dual_lr=0.1,
+            energy_constraint_dual_max=2.0,
+        )
+    )
+
+    calculator.aggregate([_record(profit=0.0, total_energy_j=5.0)])
+    raised_multiplier = calculator.energy_constraint_multiplier
+    assert raised_multiplier > 0.0
+    assert calculator.energy_budget_violation_j == 4.0
+
+    calculator.aggregate([_record(profit=0.0, total_energy_j=0.0)])
+    assert 0.0 <= calculator.energy_constraint_multiplier < raised_multiplier
+
+
+def test_partial_replica_capacity_rejection_is_penalized() -> None:
+    calculator = SharedRewardCalculator(
+        RewardConfig(
+            normalize_profit_scale=100.0,
+            capacity_drop_penalty=0.3,
+            completion_delay_penalty=0.0,
+            energy_penalty_weight=0.0,
+            advantage_reward_weight=0.0,
+            minimum_long_term_completion_rate=0.0,
+            long_term_energy_budget_j_per_step=None,
+        )
+    )
+
+    reward = calculator.aggregate(
+        [
+            _record(
+                profit=10.0,
+                requested_replica_count=2,
+                capacity_rejected_replica_count=1,
+            )
+        ]
+    )
+
+    assert math.isclose(reward, -0.05)  # 0.1 profit - 0.3 * (1 / 2)

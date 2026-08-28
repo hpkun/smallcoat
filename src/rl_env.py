@@ -23,7 +23,9 @@ from .workflow_manager import WorkflowManager
 from .workflow_manager import WorkflowStepSummary
 
 
-MAX_BS_CANDIDATE_SLOTS = 9
+MAX_PEER_UAV_CANDIDATE_SLOTS = 3
+MAX_BS_CANDIDATE_SLOTS = 6
+MAX_TARGET_SLOTS = 1 + MAX_PEER_UAV_CANDIDATE_SLOTS + MAX_BS_CANDIDATE_SLOTS + 1
 
 
 @dataclass(frozen=True)
@@ -225,19 +227,51 @@ class CMADDPGEnv:
 
         return sorted(reachable, key=estimated_finish_delay)[:MAX_BS_CANDIDATE_SLOTS]
 
+    def _rank_reachable_uavs(
+        self,
+        task_instance: TaskInstance,
+        ingress_uav: UAV,
+        decision_uav: UAV,
+    ) -> list[UAV]:
+        """Select Top-3 reachable peers by communication, queue, and compute delay."""
+
+        reachable = [
+            node
+            for node in self.base_env.iter_compute_targets(decision_uav, ingress_uav)
+            if isinstance(node, UAV) and node.node_id != ingress_uav.node_id and node.can_serve
+        ]
+
+        def estimated_finish_delay(peer_uav: UAV) -> float:
+            tx_s, prop_s = self.base_env.communication_model.total_link_delay_s(
+                data_size_bits=task_instance.task.input_size_bits,
+                sender=ingress_uav.position,
+                receiver=peer_uav.position,
+                profile=self.base_env.network_profiles.peer_uav_profile(),
+            )
+            queue_wait_s = peer_uav.queue_snapshot(self.current_time_s).expected_total_wait_s
+            compute_s = peer_uav.estimate_compute_delay(task_instance.task)
+            return float(tx_s + prop_s + queue_wait_s + compute_s)
+
+        return sorted(reachable, key=estimated_finish_delay)[:MAX_PEER_UAV_CANDIDATE_SLOTS]
+
     def _build_slot_target_nodes(
         self,
         decision_uav: UAV,
         task_slots: list[TaskInstance | None],
         ingress_uav_slots: list[UAV],
     ) -> list[list]:
-        """构造 ingress + Top-9 BS + LEO 的固定语义槽。"""
+        """Build fixed semantic slots: ingress + 3 peer UAVs + 6 BSs + LEO."""
 
         slot_nodes: list[list] = []
         for task_instance, ingress_uav in zip(task_slots, ingress_uav_slots):
             if task_instance is None or not ingress_uav.can_serve:
-                slot_nodes.append([None] * (MAX_BS_CANDIDATE_SLOTS + 2))
+                slot_nodes.append([None] * MAX_TARGET_SLOTS)
                 continue
+            peer_uavs = self._rank_reachable_uavs(
+                task_instance,
+                ingress_uav,
+                decision_uav,
+            )
             base_stations = self._rank_reachable_base_stations(
                 task_instance,
                 ingress_uav,
@@ -246,8 +280,11 @@ class CMADDPGEnv:
             padded_bs = base_stations + [None] * (
                 MAX_BS_CANDIDATE_SLOTS - len(base_stations)
             )
+            padded_peers = peer_uavs + [None] * (
+                MAX_PEER_UAV_CANDIDATE_SLOTS - len(peer_uavs)
+            )
             slot_nodes.append(
-                [ingress_uav, *padded_bs, self.base_env.leo_satellite]
+                [ingress_uav, *padded_peers, *padded_bs, self.base_env.leo_satellite]
             )
         return slot_nodes
 
@@ -263,7 +300,7 @@ class CMADDPGEnv:
             [node is not None for node in nodes]
             for nodes in slot_target_nodes
         ]
-        target_slot_ids = [f"target-slot-{index}" for index in range(MAX_BS_CANDIDATE_SLOTS + 2)]
+        target_slot_ids = [f"target-slot-{index}" for index in range(MAX_TARGET_SLOTS)]
         return (
             build_action_spec(
                 target_slot_ids,
@@ -386,16 +423,24 @@ class CMADDPGEnv:
             ):
                 if task_instance is None or not legal_target_ids:
                     continue
-                target_node_id = (
-                    slot_action.target_node_id
-                    if slot_action.target_node_id in legal_target_ids
-                    else legal_target_ids[0]
+                legal_target_set = {node_id for node_id in legal_target_ids if node_id}
+                replica_target_node_ids = tuple(
+                    node_id
+                    for node_id in slot_action.replica_target_node_ids
+                    if node_id in legal_target_set
                 )
+                if not replica_target_node_ids:
+                    continue
+                if not self.base_env.enable_redundancy:
+                    replica_target_node_ids = replica_target_node_ids[:1]
                 actions_by_task_id[task_instance.task_id] = OffloadingAction(
-                    target_node_id=target_node_id,
                     priority_eta=slot_action.priority_eta,
-                    redundancy_eta=slot_action.redundancy_eta,
-                    backup_target_node_id=slot_action.backup_target_node_id,
+                    replica_count=(
+                        slot_action.replica_count
+                        if self.base_env.enable_redundancy
+                        else 1
+                    ),
+                    replica_target_node_ids=replica_target_node_ids,
                 )
 
         executable_tasks = [
@@ -456,6 +501,8 @@ class CMADDPGEnv:
             "generated_task_count": self.episode_generated_task_count,
             "pending_ground_task_count": len(self.pending_tasks),
             "uncollected_task_count": len(deferred_tasks),
+            "energy_constraint_multiplier": self.reward_calculator.energy_constraint_multiplier,
+            "energy_budget_violation_j": self.reward_calculator.energy_budget_violation_j,
         }
         return next_states, rewards, False, info
 
@@ -470,9 +517,82 @@ class CMADDPGEnv:
     @staticmethod
     def extract_record_metrics(records: list[ExecutionRecord]) -> dict[str, float]:
         if not records:
-            return {"avg_delay_s": 0.0, "completion_rate": 0.0, "system_profit": 0.0}
+            return {
+                "avg_delay_s": 0.0,
+                "completion_rate": 0.0,
+                "system_profit": 0.0,
+                "avg_requested_replica_count": 0.0,
+                "avg_admitted_replica_count": 0.0,
+            }
+        requested_counts = np.asarray(
+            [record.requested_replica_count for record in records],
+            dtype=np.int64,
+        )
+        requested_targets = [
+            node_id
+            for record in records
+            for node_id in record.replica_target_node_ids
+        ]
+        layer_counts = {
+            layer: sum(node_id.startswith(f"{layer}-") for node_id in requested_targets)
+            for layer in ("uav", "bs", "leo")
+        }
+        redundant_target_sets = [
+            record.replica_target_node_ids
+            for record in records
+            if record.requested_replica_count > 1
+            and len(record.replica_target_node_ids) > 1
+        ]
+        same_layer_count = sum(
+            len({node_id.split("-", 1)[0] for node_id in target_ids}) == 1
+            for target_ids in redundant_target_sets
+        )
+        completed_count = sum(record.completed_before_deadline for record in records)
+        total_requested_replicas = int(requested_counts.sum())
+        total_placements = len(requested_targets)
         return {
             "avg_delay_s": float(np.mean([record.total_delay_s for record in records])),
             "completion_rate": float(np.mean([1.0 if record.completed_before_deadline else 0.0 for record in records])),
             "system_profit": float(np.sum([record.realized_profit for record in records])),
+            "avg_requested_replica_count": float(np.mean(requested_counts)),
+            "replica_count_1_rate": float(np.mean(requested_counts == 1)),
+            "replica_count_2_rate": float(np.mean(requested_counts == 2)),
+            "replica_count_3_rate": float(np.mean(requested_counts == 3)),
+            "avg_admitted_replica_count": float(
+                np.mean([record.admitted_replica_count for record in records])
+            ),
+            "capacity_rejected_replica_rate": float(
+                sum(record.capacity_rejected_replica_count for record in records)
+                / max(total_requested_replicas, 1)
+            ),
+            "uav_replica_share": float(layer_counts["uav"] / max(total_placements, 1)),
+            "bs_replica_share": float(layer_counts["bs"] / max(total_placements, 1)),
+            "leo_replica_share": float(layer_counts["leo"] / max(total_placements, 1)),
+            "same_layer_replica_rate": float(
+                same_layer_count / max(len(redundant_target_sets), 1)
+            ),
+            "cross_layer_replica_rate": float(
+                (len(redundant_target_sets) - same_layer_count)
+                / max(len(redundant_target_sets), 1)
+            ),
+            "reliable_on_time_completion_rate": float(
+                np.mean(
+                    [
+                        record.completed_before_deadline
+                        and record.satisfies_reliability
+                        and not record.failed_due_to_reliability
+                        for record in records
+                    ]
+                )
+            ),
+            "total_energy_j": float(sum(record.total_energy_j for record in records)),
+            "energy_per_completed_task": float(
+                sum(record.total_energy_j for record in records) / max(completed_count, 1)
+            ),
+            "cancellation_energy_saved_j": float(
+                sum(record.cancellation_energy_saved_j for record in records)
+            ),
+            "avg_combined_reliability": float(
+                np.mean([record.end_to_end_reliability for record in records])
+            ),
         }

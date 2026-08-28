@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch.nn.utils import clip_grad_norm_
 
-from .action_space import ActionSpec, MixedActionCodec
+from .action_space import ActionSpec, MAX_REPLICA_COUNT, MixedActionCodec
 from .maddpg_agent import AgentHyperParameters, MADDPGAgent
 from .observation_builder import OBSERVATION_INPUT_DIM
 from .replay_buffer import MultiAgentReplayBuffer, MultiAgentTransition
@@ -141,10 +141,9 @@ class CMADDPGSystem:
             decoded = codec.decode_numpy(raw_action)
             env_actions[agent_id] = decoded.to_multi_task_action()
             critic_actions[agent_id] = codec.encode_for_critic(
-                decoded.slot_target_indices,
-                decoded.slot_backup_target_indices,
+                decoded.slot_replica_counts,
+                decoded.slot_replica_target_indices,
                 decoded.slot_priority_etas,
-                decoded.slot_redundancy_etas,
             )
         return env_actions, critic_actions
 
@@ -251,14 +250,12 @@ class CMADDPGSystem:
 
     @staticmethod
     def _actor_to_critic(raw: torch.Tensor, target_count: int) -> torch.Tensor:
-        return torch.cat(
-            [
-                torch.softmax(raw[..., :target_count], dim=-1),
-                torch.softmax(raw[..., target_count : 2 * target_count], dim=-1),
-                torch.sigmoid(raw[..., -2:]),
-            ],
-            dim=-1,
-        )
+        parts = [torch.softmax(raw[..., :MAX_REPLICA_COUNT], dim=-1)]
+        for head_index in range(MAX_REPLICA_COUNT):
+            start = MAX_REPLICA_COUNT + head_index * target_count
+            parts.append(torch.softmax(raw[..., start : start + target_count], dim=-1))
+        parts.append(torch.sigmoid(raw[..., -1:]))
+        return torch.cat(parts, dim=-1)
 
     def _current_sets(
         self, transition: MultiAgentTransition

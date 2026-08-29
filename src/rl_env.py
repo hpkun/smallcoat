@@ -183,37 +183,23 @@ class CMADDPGEnv:
                 if uav.can_serve
             ]
 
-        uavs_by_id = {uav.node_id: uav for uav in self.base_env.uavs}
         bindings: list[DecisionAgentBinding] = []
         clustered_member_ids: set[str] = set()
         for cluster in sorted(
             manager.cluster_infos.values(), key=lambda item: item.logical_agent_id
         ):
             clustered_member_ids.update(cluster.member_uav_ids)
-            serviceable_members = [
-                uavs_by_id[uav_id]
-                for uav_id in cluster.member_uav_ids
-                if uav_id in uavs_by_id and uavs_by_id[uav_id].can_serve
-            ]
-            if not serviceable_members:
-                continue
-            current_head = uavs_by_id.get(cluster.head_uav_id)
-            decision_uav = (
-                current_head
-                if current_head is not None and current_head.can_serve
-                else min(
-                    serviceable_members,
-                    key=lambda uav: (
-                        uav.position.distance_to(cluster.centroid),
-                        uav.node_id,
-                    ),
-                )
+            decision_uav_id = manager.resolve_serviceable_head(
+                cluster.cluster_id,
+                self.base_env.uavs,
             )
+            if decision_uav_id is None:
+                continue
             bindings.append(
                 DecisionAgentBinding(
                     agent_id=cluster.logical_agent_id,
                     cluster_id=cluster.cluster_id,
-                    decision_uav_id=decision_uav.node_id,
+                    decision_uav_id=decision_uav_id,
                 )
             )
         bindings.extend(

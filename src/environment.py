@@ -931,7 +931,13 @@ class SAGINEnvironment:
     def get_decision_uav(self, ingress_uav: UAV) -> UAV:
         if self.clustering_manager is None:
             return ingress_uav
-        head_uav_id = self.clustering_manager.get_head_uav_id(ingress_uav.node_id)
+        cluster = self.clustering_manager.get_cluster_info_for_uav(ingress_uav.node_id)
+        if cluster is None:
+            return ingress_uav
+        head_uav_id = self.clustering_manager.resolve_serviceable_head(
+            cluster.cluster_id,
+            self.uavs,
+        )
         if head_uav_id is None:
             return ingress_uav
         for uav in self.uavs:

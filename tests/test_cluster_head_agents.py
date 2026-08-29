@@ -45,6 +45,44 @@ def test_logical_ch_agent_id_is_stable_across_physical_head_candidates() -> None
     assert env._logical_agent_id(first) == cluster.logical_agent_id
 
 
+def test_failed_physical_head_is_replaced_consistently_for_rl_and_execution() -> None:
+    env = build_training_env()
+    manager = env.base_env.clustering_manager
+    assert manager is not None
+    cluster = next(
+        cluster
+        for cluster in manager.cluster_infos.values()
+        if len(cluster.member_uav_ids) >= 2
+    )
+    original_head = env.base_env.get_uav_by_id(cluster.head_uav_id)
+    original_head.remaining_energy_j = 0.0
+    serviceable_members = [
+        env.base_env.get_uav_by_id(uav_id)
+        for uav_id in cluster.member_uav_ids
+        if uav_id != original_head.node_id
+    ]
+    for uav in serviceable_members:
+        uav.remaining_energy_j = uav.battery_capacity_j
+    expected_head = min(
+        serviceable_members,
+        key=lambda uav: (
+            uav.position.distance_to(cluster.centroid),
+            uav.node_id,
+        ),
+    )
+
+    bindings = {binding.agent_id: binding for binding in env._decision_agents()}
+    updated_cluster = manager.cluster_infos[cluster.cluster_id]
+    execution_head = env.base_env.get_decision_uav(original_head)
+
+    assert updated_cluster.logical_agent_id == cluster.logical_agent_id
+    assert updated_cluster.head_uav_id == expected_head.node_id
+    assert bindings[cluster.logical_agent_id].decision_uav_id == expected_head.node_id
+    assert execution_head.node_id == expected_head.node_id
+    assert expected_head.is_cluster_head
+    assert not original_head.is_cluster_head
+
+
 def test_context_and_replay_use_logical_agent_ids() -> None:
     env = build_training_env(arrival_rate_tasks_per_s=25.0)
     for _ in range(20):

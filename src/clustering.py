@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import replace
 import math
 
 import numpy as np
@@ -395,6 +396,53 @@ class KMDUCManager:
             if uav_id in cluster.member_uav_ids:
                 return cluster.head_uav_id
         return None
+
+    def get_cluster_info_for_uav(self, uav_id: str) -> ClusterInfo | None:
+        """Return the cluster containing the given UAV."""
+
+        for cluster in self.cluster_infos.values():
+            if uav_id in cluster.member_uav_ids:
+                return cluster
+        return None
+
+    def resolve_serviceable_head(
+        self,
+        cluster_id: int,
+        uavs: list[UAV],
+    ) -> str | None:
+        """Resolve and persist the physical CH currently able to serve a cluster."""
+
+        cluster = self.cluster_infos.get(cluster_id)
+        if cluster is None:
+            return None
+
+        uavs_by_id = {uav.node_id: uav for uav in uavs}
+        current_head = uavs_by_id.get(cluster.head_uav_id)
+        if current_head is not None and current_head.can_serve:
+            return current_head.node_id
+
+        serviceable_members = [
+            uavs_by_id[uav_id]
+            for uav_id in cluster.member_uav_ids
+            if uav_id in uavs_by_id and uavs_by_id[uav_id].can_serve
+        ]
+        if not serviceable_members:
+            return None
+
+        replacement_head = min(
+            serviceable_members,
+            key=lambda uav: (
+                uav.position.distance_to(cluster.centroid),
+                uav.node_id,
+            ),
+        )
+        self.cluster_infos[cluster_id] = replace(
+            cluster,
+            head_uav_id=replacement_head.node_id,
+        )
+        self.ch_not_center_counters[cluster_id] = 0
+        self._apply_cluster_infos(uavs)
+        return replacement_head.node_id
 
     def get_logical_agent_id(self, uav_id: str) -> str | None:
         for cluster in self.cluster_infos.values():

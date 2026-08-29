@@ -170,6 +170,13 @@ class CMADDPGTrainer:
                 step_env_time_s = time.perf_counter() - env_started_at
                 episode_env_time_s += step_env_time_s
                 episode_shared_rewards.append(info["shared_reward"])
+                next_action_specs = info["action_specs"]
+                for agent_id, observation in next_observations.items():
+                    self.system.ensure_agent(
+                        agent_id=agent_id,
+                        state_dim=int(observation.shape[0]),
+                        action_spec=next_action_specs[agent_id],
+                    )
                 workflow_summary = info.get("workflow_summary", {})
                 battery_status = info["battery_status"]
 
@@ -619,7 +626,7 @@ class CMADDPGTrainer:
 
                 # 切换到下一时刻观测，继续本 episode 的下一个 step。
                 observations = next_observations
-                action_specs = info["action_specs"]
+                action_specs = next_action_specs
 
             # 汇总本 episode 内所有 step-level 指标，形成 episode-level 曲线数据。
             episode_shared_reward_sum = sum(episode_shared_rewards)

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 
 from src.action_space import build_action_spec
 from src.cmaddpg import CMADDPGSystem
 from src.observation_builder import OBSERVATION_INPUT_DIM
 
 
-def test_update_reuses_target_actions_and_refreshes_only_soft_updated_actor() -> None:
+def test_update_builds_targets_once_and_steps_one_global_critic(monkeypatch) -> None:
     system = CMADDPGSystem()
     agent_ids = ["agent-0", "agent-1", "agent-2"]
     action_spec = build_action_spec(agent_ids, [[True, True, True]])
@@ -44,6 +45,17 @@ def test_update_reuses_target_actions_and_refreshes_only_soft_updated_actor() ->
 
         hooks.append(system.agents[agent_id].target_actor.register_forward_hook(count_call))
 
+    assert system.global_critic_optimizer is not None
+    optimizer_step = system.global_critic_optimizer.step
+    critic_step_calls = 0
+
+    def count_critic_step(*args, **kwargs):
+        nonlocal critic_step_calls
+        critic_step_calls += 1
+        return optimizer_step(*args, **kwargs)
+
+    monkeypatch.setattr(system.global_critic_optimizer, "step", count_critic_step)
+
     try:
         result = system.update(batch_size=2)
     finally:
@@ -51,12 +63,14 @@ def test_update_reuses_target_actions_and_refreshes_only_soft_updated_actor() ->
             hook.remove()
 
     assert result is not None
-    assert all(call_count > 0 for call_count in target_actor_calls.values())
+    assert target_actor_calls == dict.fromkeys(agent_ids, 2)
+    assert critic_step_calls == 1
+    assert system.global_critic is not None
     assert all(
         parameter.requires_grad
-        for agent in system.agents.values()
-        for parameter in agent.critic.parameters()
+        for parameter in system.global_critic.parameters()
     )
+    assert all(not hasattr(actor, "critic") for actor in system.actors.values())
 
 
 def test_task_count_changes_without_rebuilding_agent_networks() -> None:
@@ -70,11 +84,38 @@ def test_task_count_changes_without_rebuilding_agent_networks() -> None:
     }
     system.ensure_agent("agent-0", OBSERVATION_INPUT_DIM, specs[1])
     actor = system.agents["agent-0"].actor
-    critic = system.agents["agent-0"].critic
+    critic = system.global_critic
     for count in (1, 3):
         observation = np.ones(count * OBSERVATION_INPUT_DIM, dtype=np.float32)
         system.ensure_agent("agent-0", observation.size, specs[count])
         raw = system.act({"agent-0": observation}, add_noise=False)
         assert raw["agent-0"].size == specs[count].actor_output_dim
     assert system.agents["agent-0"].actor is actor
-    assert system.agents["agent-0"].critic is critic
+    assert system.global_critic is critic
+
+
+def test_checkpoint_stores_actors_and_one_global_critic(tmp_path) -> None:
+    system = CMADDPGSystem()
+    agent_ids = ["ch-agent-0", "ch-agent-1"]
+    action_spec = build_action_spec(agent_ids, [[True, True]])
+    for agent_id in agent_ids:
+        system.ensure_agent(agent_id, OBSERVATION_INPUT_DIM, action_spec)
+
+    checkpoint_path = system.save(tmp_path / "global-critic.pt")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+
+    assert checkpoint["architecture"] == "multi_actor_global_critic_v2"
+    assert set(checkpoint["actors"]) == set(agent_ids)
+    assert "global_critic" in checkpoint
+    assert all("critic_state_dict" not in state for state in checkpoint["actors"].values())
+
+    restored = CMADDPGSystem()
+    for agent_id in agent_ids:
+        restored.ensure_agent(agent_id, OBSERVATION_INPUT_DIM, action_spec)
+    restored.load(checkpoint_path, strict=True)
+    assert restored.global_critic is not None
+    assert system.global_critic is not None
+    for expected, actual in zip(
+        system.global_critic.parameters(), restored.global_critic.parameters()
+    ):
+        torch.testing.assert_close(actual, expected)

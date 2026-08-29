@@ -43,6 +43,7 @@ from .environment import SAGINEnvironment
 from .evaluation import EvaluationSummary
 from .evaluation import evaluate_baseline
 from .maddpg_agent import AgentHyperParameters
+from .maddpg_agent import CHActorAgent
 from .maddpg_agent import MADDPGAgent
 from .metrics_logger import MetricsLogger
 from .networks import ActorNetwork
@@ -62,6 +63,7 @@ from .reward import RewardConfig
 from .reward import SharedRewardCalculator
 from .rl_env import AgentDecisionContext
 from .rl_env import CMADDPGEnv
+from .rl_env import DecisionAgentBinding
 from .scenario_generator import ScenarioDefinition
 from .scenario_generator import TASK_SCENARIO_NAMES
 from .scenario_generator import build_balanced_scenario
@@ -98,6 +100,7 @@ __all__ = [
     "BaseStation",
     "CandidateExecutionPlan",
     "CapacitySnapshot",
+    "CHActorAgent",
     "CMADDPGEnv",
     "CMADDPGSystem",
     "CMADDPGTrainer",
@@ -108,6 +111,7 @@ __all__ = [
     "ConstraintCheckResult",
     "CriticNetwork",
     "DecodedAction",
+    "DecisionAgentBinding",
     "EvaluationSummary",
     "ExecutionRecord",
     "EnergyBreakdown",

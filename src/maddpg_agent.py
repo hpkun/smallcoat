@@ -5,11 +5,9 @@ import copy
 
 import numpy as np
 import torch
-from torch import nn
 from torch.optim import Adam
 
 from .networks import VariableTaskActorNetwork
-from .networks import VariableTaskCriticNetwork
 
 
 @dataclass(frozen=True)
@@ -62,8 +60,8 @@ class OrnsteinUhlenbeckNoise:
         return self.state
 
 
-class MADDPGAgent:
-    """Actor/Critic pair owned by one CH agent."""
+class CHActorAgent:
+    """Actor, target Actor, optimizer, and exploration process for one logical CH."""
 
     def __init__(
         self,
@@ -92,22 +90,7 @@ class MADDPGAgent:
             attention_heads=self.hyper_params.actor_attention_heads,
         ).to(device)
         self.target_actor = copy.deepcopy(self.actor).to(device)
-        self.critic = VariableTaskCriticNetwork(
-            self.per_task_state_dim,
-            self.per_task_action_dim,
-        ).to(device)
-        self.target_critic = copy.deepcopy(self.critic).to(device)
-
         self.actor_optimizer = Adam(self.actor.parameters(), lr=self.hyper_params.actor_lr)
-        self.critic_optimizer = Adam(self.critic.parameters(), lr=self.hyper_params.critic_lr)
-        if self.hyper_params.critic_loss_name == "mse":
-            self.loss_fn = nn.MSELoss()
-        elif self.hyper_params.critic_loss_name == "smooth_l1":
-            self.loss_fn = nn.SmoothL1Loss()
-        else:
-            raise ValueError(
-                f"Unsupported critic_loss_name: {self.hyper_params.critic_loss_name}"
-            )
 
     def act(self, state: np.ndarray, add_noise: bool = True) -> np.ndarray:
         state_array = np.asarray(state, dtype=np.float32).reshape(-1)
@@ -130,7 +113,7 @@ class MADDPGAgent:
     def reset_noise(self) -> None:
         self.exploration_noise.reset()
 
-    def soft_update(self) -> None:
+    def soft_update_actor(self) -> None:
         tau = self.hyper_params.tau
         for target_param, param in zip(
             self.target_actor.parameters(), self.actor.parameters()
@@ -138,9 +121,11 @@ class MADDPGAgent:
             target_param.data.copy_(
                 tau * param.data + (1.0 - tau) * target_param.data
             )
-        for target_param, param in zip(
-            self.target_critic.parameters(), self.critic.parameters()
-        ):
-            target_param.data.copy_(
-                tau * param.data + (1.0 - tau) * target_param.data
-            )
+
+    def soft_update(self) -> None:
+        """Backward-compatible alias for the actor-only target update."""
+        self.soft_update_actor()
+
+
+# Preserve the public name used by existing callers while making ownership explicit.
+MADDPGAgent = CHActorAgent

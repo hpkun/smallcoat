@@ -225,7 +225,7 @@ src/
   entities.py            UAV、BS、LEO、任务实例、执行记录
   environment.py         SAGIN 基础环境和任务执行流程
   evaluation.py          基线评估入口逻辑
-  maddpg_agent.py        单个 MADDPG agent 的 Actor/Critic 封装
+  maddpg_agent.py        单个逻辑 CH 的 Actor、Target Actor、优化器和探索噪声
   metrics_logger.py      训练指标记录和 JSON 导出
   networks.py            Actor、Critic、MLP、自注意力 Actor 编码器
   objective.py           论文目标函数拆解
@@ -269,7 +269,7 @@ examples/basic_simulation.py     基础环境仿真示例
 
 ### Agent
 
-每个决策 agent 对应一个 CH UAV 或孤立 UAV。普通 CM UAV 的任务会汇聚到所属 CH，由 CH 进行簇级卸载决策。
+每个簇持有独立于 K-Means `cluster_id` 的稳定 `logical_agent_id`。首次聚类按质心坐标排序分配 `ch-agent-*`；周期性重聚类按成员 Jaccard 重叠优先、质心距离次优先继承 logical ID。每个时隙再把 logical agent 绑定到当前物理 CH UAV，因此 CH 重选或 K-Means label 变化都不会重建或切换 Actor。孤立 UAV 使用独立的逻辑 agent。
 
 ### 状态
 
@@ -327,7 +327,7 @@ priority_eta[1]
 
 ### Critic
 
-CMADDPG 使用 set-based centralized critic。每个任务 token 由一条 166 维状态和一条 37 维动作组成；Critic 中动作保持软概率形式：
+CMADDPG 使用唯一的 system-level set-based centralized critic；所有逻辑 CH Actor 共享该 Critic 计算策略梯度。每次 `CMADDPGSystem.update()` 只更新一次 Global Critic，然后分别更新当前 batch 中的 Actor。每个任务 token 由一条 166 维状态和一条 37 维动作组成；Critic 中动作保持软概率形式：
 
 ```text
 replica_count_prob[3]

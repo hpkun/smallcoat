@@ -13,8 +13,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.cmaddpg import CMADDPGSystem
+from src.cmaddpg import VARIABLE_TASK_ARCHITECTURE as CMADDPG_ARCHITECTURE
 from src.cmppo import CMPPOConfig
 from src.cmppo import CMPPOSystem
+from src.cmppo import VARIABLE_TASK_ARCHITECTURE as CMPPO_ARCHITECTURE
 from src.metrics_logger import MetricsLogger
 from src.maddpg_agent import AgentHyperParameters
 from src.observation_builder import OBSERVATION_INPUT_DIM
@@ -49,10 +51,13 @@ def evaluate_checkpoint(
         map_location="cpu",
         weights_only=False,
     )
-    if checkpoint_data.get("architecture") != "variable_task_v1":
+    expected_architecture = (
+        CMADDPG_ARCHITECTURE if algorithm == "cmaddpg" else CMPPO_ARCHITECTURE
+    )
+    if checkpoint_data.get("architecture") != expected_architecture:
         raise ValueError(
-            "The checkpoint uses the retired fixed-task-slot architecture. "
-            "Train a new variable-task checkpoint first."
+            f"Expected {algorithm} checkpoint architecture {expected_architecture!r}; "
+            "train a new compatible checkpoint first."
         )
 
     global_time_slot = 0
@@ -70,14 +75,12 @@ def evaluate_checkpoint(
                 )
                 for agent_id, observation in observations.items():
                     system.ensure_agent(agent_id, int(observation.shape[0]), action_specs[agent_id])
-                # A checkpoint's centralized critics may include CH agents that
-                # are not active in the first evaluation reset. Materialize all
-                # saved agents before rebuilding the joint critic dimensions.
+                # Materialize Actors that are saved but inactive on the first reset.
                 template_spec = next(iter(action_specs.values()))
                 template_state_dim = (
                     template_spec.num_task_slots * OBSERVATION_INPUT_DIM
                 )
-                for agent_id in checkpoint_data.get("agents", {}):
+                for agent_id in checkpoint_data.get("actors", {}):
                     system.ensure_agent(agent_id, template_state_dim, template_spec)
                 system.rebuild_joint_critics()
                 system.load(checkpoint)

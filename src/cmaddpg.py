@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
 import numpy as np
 import torch
+from torch import nn
 from torch.nn.utils import clip_grad_norm_
+from torch.optim import Adam
 
 from .action_space import ActionSpec, MAX_REPLICA_COUNT, MixedActionCodec
-from .maddpg_agent import AgentHyperParameters, MADDPGAgent
+from .maddpg_agent import AgentHyperParameters, CHActorAgent
+from .networks import VariableTaskCriticNetwork
 from .observation_builder import OBSERVATION_INPUT_DIM
 from .replay_buffer import MultiAgentReplayBuffer, MultiAgentTransition
 
 
-VARIABLE_TASK_ARCHITECTURE = "variable_task_v1"
+VARIABLE_TASK_ARCHITECTURE = "multi_actor_global_critic_v2"
 
 
 @dataclass(frozen=True)
@@ -65,7 +69,7 @@ def _pad_tensors(
 
 
 class CMADDPGSystem:
-    """CMADDPG with one shared per-task Actor per CH and set-based Critics."""
+    """CMADDPG with one Actor per logical CH and one set-based global Critic."""
 
     def __init__(
         self,
@@ -74,14 +78,30 @@ class CMADDPGSystem:
     ) -> None:
         self.device = torch.device(device)
         self.agent_hyper_params = agent_hyper_params or AgentHyperParameters()
-        self.agents: dict[str, MADDPGAgent] = {}
+        self.actors: dict[str, CHActorAgent] = {}
+        self.global_critic: VariableTaskCriticNetwork | None = None
+        self.target_global_critic: VariableTaskCriticNetwork | None = None
+        self.global_critic_optimizer: Adam | None = None
+        if self.agent_hyper_params.critic_loss_name == "mse":
+            self.critic_loss_fn: nn.Module = nn.MSELoss()
+        elif self.agent_hyper_params.critic_loss_name == "smooth_l1":
+            self.critic_loss_fn = nn.SmoothL1Loss()
+        else:
+            raise ValueError(
+                f"Unsupported critic_loss_name: {self.agent_hyper_params.critic_loss_name}"
+            )
         self.action_specs: dict[str, ActionSpec] = {}
         self.replay_buffer = MultiAgentReplayBuffer()
         self.state_dims: dict[str, int] = {}
         self.action_dims: dict[str, int] = {}
 
+    @property
+    def agents(self) -> dict[str, CHActorAgent]:
+        """Compatibility view; logical agents now own Actor state only."""
+        return self.actors
+
     def _sorted_agent_ids(self) -> list[str]:
-        return sorted(self.agents)
+        return sorted(self.actors)
 
     def joint_state_dim(self, agent_ids=None) -> int:
         del agent_ids
@@ -110,8 +130,18 @@ class CMADDPGSystem:
         self.state_dims[agent_id] = OBSERVATION_INPUT_DIM
         self.action_dims[agent_id] = action_width
         self.action_specs[agent_id] = action_spec
-        if agent_id not in self.agents:
-            self.agents[agent_id] = MADDPGAgent(
+        if self.global_critic is None:
+            self.global_critic = VariableTaskCriticNetwork(
+                per_task_state_dim=OBSERVATION_INPUT_DIM,
+                per_task_action_dim=action_width,
+            ).to(self.device)
+            self.target_global_critic = copy.deepcopy(self.global_critic).to(self.device)
+            self.global_critic_optimizer = Adam(
+                self.global_critic.parameters(),
+                lr=self.agent_hyper_params.critic_lr,
+            )
+        if agent_id not in self.actors:
+            self.actors[agent_id] = CHActorAgent(
                 per_task_state_dim=OBSERVATION_INPUT_DIM,
                 per_task_action_dim=action_width,
                 device=self.device,
@@ -125,13 +155,13 @@ class CMADDPGSystem:
         self, observations: dict[str, np.ndarray], *, add_noise: bool = True
     ) -> dict[str, np.ndarray]:
         return {
-            agent_id: self.agents[agent_id].act(observation, add_noise=add_noise)
+            agent_id: self.actors[agent_id].act(observation, add_noise=add_noise)
             for agent_id, observation in observations.items()
         }
 
     def reset_noise(self) -> None:
-        for agent in self.agents.values():
-            agent.reset_noise()
+        for actor in self.actors.values():
+            actor.reset_noise()
 
     def decode_actions(self, raw_actions: dict[str, np.ndarray]):
         env_actions = {}
@@ -148,6 +178,12 @@ class CMADDPGSystem:
         return env_actions, critic_actions
 
     def save(self, output_path: str | Path) -> Path:
+        if (
+            self.global_critic is None
+            or self.target_global_critic is None
+            or self.global_critic_optimizer is None
+        ):
+            raise RuntimeError("Cannot save CMADDPG before the global Critic is initialized.")
         path = Path(output_path)
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
@@ -158,16 +194,18 @@ class CMADDPGSystem:
                 "agent_hyper_params": asdict(self.agent_hyper_params),
                 "state_dims": dict(self.state_dims),
                 "action_dims": dict(self.action_dims),
-                "agents": {
+                "actors": {
                     agent_id: {
-                        "actor_state_dict": agent.actor.state_dict(),
-                        "target_actor_state_dict": agent.target_actor.state_dict(),
-                        "critic_state_dict": agent.critic.state_dict(),
-                        "target_critic_state_dict": agent.target_critic.state_dict(),
-                        "actor_optimizer_state_dict": agent.actor_optimizer.state_dict(),
-                        "critic_optimizer_state_dict": agent.critic_optimizer.state_dict(),
+                        "actor_state_dict": actor.actor.state_dict(),
+                        "target_actor_state_dict": actor.target_actor.state_dict(),
+                        "actor_optimizer_state_dict": actor.actor_optimizer.state_dict(),
                     }
-                    for agent_id, agent in self.agents.items()
+                    for agent_id, actor in self.actors.items()
+                },
+                "global_critic": {
+                    "critic_state_dict": self.global_critic.state_dict(),
+                    "target_critic_state_dict": self.target_global_critic.state_dict(),
+                    "optimizer_state_dict": self.global_critic_optimizer.state_dict(),
                 },
             },
             path,
@@ -181,28 +219,41 @@ class CMADDPGSystem:
             raise ValueError(f"Unsupported checkpoint algorithm in {path}")
         if checkpoint.get("architecture") != VARIABLE_TASK_ARCHITECTURE:
             raise ValueError(
-                "This checkpoint uses the retired fixed-task-slot architecture; "
-                "train a new variable-task checkpoint."
+                "This checkpoint does not use the multi-Actor/global-Critic architecture; "
+                "train a new checkpoint."
             )
-        saved_agents = checkpoint.get("agents", {})
-        missing = sorted(set(saved_agents) - set(self.agents))
-        unexpected = sorted(set(self.agents) - set(saved_agents))
+        saved_actors = checkpoint.get("actors", {})
+        missing = sorted(set(saved_actors) - set(self.actors))
+        unexpected = sorted(set(self.actors) - set(saved_actors))
         if strict and (missing or unexpected):
             raise ValueError(
-                f"Checkpoint agents differ: missing={missing}, unexpected={unexpected}"
+                f"Checkpoint actors differ: missing={missing}, unexpected={unexpected}"
             )
-        for agent_id, state in saved_agents.items():
-            agent = self.agents.get(agent_id)
-            if agent is None:
+        for agent_id, state in saved_actors.items():
+            actor = self.actors.get(agent_id)
+            if actor is None:
                 continue
-            agent.actor.load_state_dict(state["actor_state_dict"])
-            agent.target_actor.load_state_dict(state["target_actor_state_dict"])
-            agent.critic.load_state_dict(state["critic_state_dict"])
-            agent.target_critic.load_state_dict(state["target_critic_state_dict"])
+            actor.actor.load_state_dict(state["actor_state_dict"])
+            actor.target_actor.load_state_dict(state["target_actor_state_dict"])
             if "actor_optimizer_state_dict" in state:
-                agent.actor_optimizer.load_state_dict(state["actor_optimizer_state_dict"])
-            if "critic_optimizer_state_dict" in state:
-                agent.critic_optimizer.load_state_dict(state["critic_optimizer_state_dict"])
+                actor.actor_optimizer.load_state_dict(state["actor_optimizer_state_dict"])
+        if (
+            self.global_critic is None
+            or self.target_global_critic is None
+            or self.global_critic_optimizer is None
+        ):
+            raise RuntimeError("Initialize at least one Actor before loading a checkpoint.")
+        critic_state = checkpoint.get("global_critic")
+        if not isinstance(critic_state, dict):
+            raise ValueError("Checkpoint is missing global Critic state.")
+        self.global_critic.load_state_dict(critic_state["critic_state_dict"])
+        self.target_global_critic.load_state_dict(
+            critic_state["target_critic_state_dict"]
+        )
+        if "optimizer_state_dict" in critic_state:
+            self.global_critic_optimizer.load_state_dict(
+                critic_state["optimizer_state_dict"]
+            )
         return path
 
     def store_transitions(
@@ -263,7 +314,7 @@ class CMADDPGSystem:
         states: list[np.ndarray] = []
         actions: list[np.ndarray] = []
         for agent_id in sorted(set(transition.local_states) & set(transition.local_actions)):
-            if agent_id not in self.agents:
+            if agent_id not in self.actors:
                 continue
             state_rows = _rows(
                 transition.local_states[agent_id], OBSERVATION_INPUT_DIM, "state"
@@ -292,8 +343,8 @@ class CMADDPGSystem:
                 states: list[torch.Tensor] = []
                 actions: list[torch.Tensor] = []
                 for agent_id in sorted(transition.next_local_states):
-                    agent = self.agents.get(agent_id)
-                    if agent is None:
+                    actor = self.actors.get(agent_id)
+                    if actor is None:
                         continue
                     state_array = _rows(
                         transition.next_local_states[agent_id],
@@ -305,7 +356,7 @@ class CMADDPGSystem:
                     state_tensor = torch.as_tensor(
                         state_array, dtype=torch.float32, device=self.device
                     )
-                    raw = agent.target_actor(state_tensor)
+                    raw = actor.target_actor(state_tensor)
                     states.append(state_tensor)
                     actions.append(
                         self._actor_to_critic(
@@ -332,9 +383,26 @@ class CMADDPGSystem:
             raise ValueError("Target state/action masks differ.")
         return padded_states, padded_actions, mask
 
+    def soft_update_global_critic(self) -> None:
+        if self.global_critic is None or self.target_global_critic is None:
+            raise RuntimeError("Global Critic is not initialized.")
+        tau = self.agent_hyper_params.tau
+        for target_param, param in zip(
+            self.target_global_critic.parameters(), self.global_critic.parameters()
+        ):
+            target_param.data.copy_(
+                tau * param.data + (1.0 - tau) * target_param.data
+            )
+
     def update(self, batch_size: int = 64) -> TrainingBatch | None:
-        if len(self.replay_buffer) < batch_size or not self.agents:
+        if len(self.replay_buffer) < batch_size or not self.actors:
             return None
+        if (
+            self.global_critic is None
+            or self.target_global_critic is None
+            or self.global_critic_optimizer is None
+        ):
+            raise RuntimeError("Global Critic is not initialized.")
         batch = self.replay_buffer.sample(batch_size)
         update_ids = [
             agent_id
@@ -364,99 +432,108 @@ class CMADDPGSystem:
             device=self.device,
         )
         next_states, next_actions, next_mask = self._target_sets(batch)
+        with torch.no_grad():
+            target_q = self.target_global_critic(
+                next_states, next_actions, next_mask
+            )
+            expected_q = (
+                rewards
+                + self.agent_hyper_params.gamma * (1.0 - dones) * target_q
+            )
+        current_q = self.global_critic(joint_states, joint_actions, state_mask)
+        critic_loss = self.critic_loss_fn(current_q, expected_q)
+        self.global_critic_optimizer.zero_grad()
+        critic_loss.backward()
+        if self.agent_hyper_params.critic_grad_clip_norm > 0:
+            clip_grad_norm_(
+                self.global_critic.parameters(),
+                self.agent_hyper_params.critic_grad_clip_norm,
+            )
+        self.global_critic_optimizer.step()
+
         actor_losses: list[float] = []
-        critic_losses: list[float] = []
-
-        for index, agent_id in enumerate(update_ids):
-            agent = self.agents[agent_id]
-            with torch.no_grad():
-                target_q = agent.target_critic(next_states, next_actions, next_mask)
-                expected_q = rewards + agent.hyper_params.gamma * (1.0 - dones) * target_q
-            current_q = agent.critic(joint_states, joint_actions, state_mask)
-            critic_loss = agent.loss_fn(current_q, expected_q)
-            agent.critic_optimizer.zero_grad()
-            critic_loss.backward()
-            if agent.hyper_params.critic_grad_clip_norm > 0:
-                clip_grad_norm_(
-                    agent.critic.parameters(), agent.hyper_params.critic_grad_clip_norm
-                )
-            agent.critic_optimizer.step()
-
-            predicted_sets: list[torch.Tensor] = []
-            presence: list[bool] = []
-            for transition in batch:
-                parts: list[torch.Tensor] = []
-                present = False
-                for other_id in sorted(
-                    set(transition.local_states) & set(transition.local_actions)
-                ):
-                    if other_id not in self.agents:
-                        continue
-                    if other_id == agent_id:
-                        state_tensor = torch.as_tensor(
-                            _rows(
-                                transition.local_states[other_id],
-                                OBSERVATION_INPUT_DIM,
-                                "actor state",
-                            ),
-                            dtype=torch.float32,
-                            device=self.device,
-                        )
-                        raw = agent.actor(state_tensor)
-                        parts.append(
-                            self._actor_to_critic(
-                                raw,
-                                self.action_specs[agent_id].num_discrete_targets,
-                            )
-                        )
-                        present = True
-                    else:
-                        parts.append(
-                            torch.as_tensor(
+        for parameter in self.global_critic.parameters():
+            parameter.requires_grad_(False)
+        try:
+            for agent_id in update_ids:
+                actor = self.actors[agent_id]
+                predicted_sets: list[torch.Tensor] = []
+                presence: list[bool] = []
+                for transition in batch:
+                    parts: list[torch.Tensor] = []
+                    present = False
+                    for other_id in sorted(
+                        set(transition.local_states) & set(transition.local_actions)
+                    ):
+                        if other_id not in self.actors:
+                            continue
+                        if other_id == agent_id:
+                            state_tensor = torch.as_tensor(
                                 _rows(
-                                    transition.local_actions[other_id],
-                                    self.action_dims[other_id],
-                                    "replay action",
+                                    transition.local_states[other_id],
+                                    OBSERVATION_INPUT_DIM,
+                                    "actor state",
                                 ),
                                 dtype=torch.float32,
                                 device=self.device,
                             )
-                        )
-                predicted_sets.append(
-                    torch.cat(parts) if parts else torch.zeros(
-                        0, action_width, device=self.device
+                            raw = actor.actor(state_tensor)
+                            parts.append(
+                                self._actor_to_critic(
+                                    raw,
+                                    self.action_specs[agent_id].num_discrete_targets,
+                                )
+                            )
+                            present = True
+                        else:
+                            parts.append(
+                                torch.as_tensor(
+                                    _rows(
+                                        transition.local_actions[other_id],
+                                        self.action_dims[other_id],
+                                        "replay action",
+                                    ),
+                                    dtype=torch.float32,
+                                    device=self.device,
+                                )
+                            )
+                    predicted_sets.append(
+                        torch.cat(parts)
+                        if parts
+                        else torch.zeros(0, action_width, device=self.device)
                     )
+                    presence.append(present)
+                predicted_actions, predicted_mask = _pad_tensors(
+                    predicted_sets, action_width, self.device
                 )
-                presence.append(present)
-            predicted_actions, predicted_mask = _pad_tensors(
-                predicted_sets, action_width, self.device
-            )
-            if not torch.equal(state_mask, predicted_mask):
-                raise ValueError("Predicted action mask differs from state mask.")
-            for parameter in agent.critic.parameters():
-                parameter.requires_grad_(False)
-            actor_q = agent.critic(joint_states, predicted_actions, state_mask)
-            presence_tensor = torch.as_tensor(
-                presence, dtype=torch.bool, device=self.device
-            )
-            actor_loss = -actor_q[presence_tensor].mean()
-            agent.actor_optimizer.zero_grad()
-            actor_loss.backward()
-            for parameter in agent.critic.parameters():
+                if not torch.equal(state_mask, predicted_mask):
+                    raise ValueError("Predicted action mask differs from state mask.")
+                actor_q = self.global_critic(
+                    joint_states, predicted_actions, state_mask
+                )
+                presence_tensor = torch.as_tensor(
+                    presence, dtype=torch.bool, device=self.device
+                )
+                actor_loss = -actor_q[presence_tensor].mean()
+                actor.actor_optimizer.zero_grad()
+                actor_loss.backward()
+                if actor.hyper_params.actor_grad_clip_norm > 0:
+                    clip_grad_norm_(
+                        actor.actor.parameters(),
+                        actor.hyper_params.actor_grad_clip_norm,
+                    )
+                actor.actor_optimizer.step()
+                actor_losses.append(float(actor_loss.item()))
+        finally:
+            for parameter in self.global_critic.parameters():
                 parameter.requires_grad_(True)
-            if agent.hyper_params.actor_grad_clip_norm > 0:
-                clip_grad_norm_(
-                    agent.actor.parameters(), agent.hyper_params.actor_grad_clip_norm
-                )
-            agent.actor_optimizer.step()
-            agent.soft_update()
-            if index + 1 < len(update_ids):
-                next_states, next_actions, next_mask = self._target_sets(batch)
-            actor_losses.append(float(actor_loss.item()))
-            critic_losses.append(float(critic_loss.item()))
+
+        for agent_id in update_ids:
+            self.actors[agent_id].soft_update_actor()
+        self.soft_update_global_critic()
 
         return TrainingBatch(
             actor_loss=float(np.mean(actor_losses)),
-            critic_loss=float(np.mean(critic_losses)),
+            critic_loss=float(critic_loss.item()),
             batch_size=len(batch),
         )

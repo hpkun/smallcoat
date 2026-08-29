@@ -35,6 +35,7 @@ class TaskInstance:
     task: Task
     workflow_id: str | None = None
     owner_ch_id: str | None = None
+    owner_agent_id: str | None = None
     workflow_arrival_time_s: float | None = None
     workflow_deadline_s: float | None = None
     workflow_task_count: int = 1

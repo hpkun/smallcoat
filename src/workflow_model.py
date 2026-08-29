@@ -37,6 +37,7 @@ class WorkflowInstance:
     arrival_time_s: float
     deadline_s: float
     task_specs: dict[str, WorkflowTaskSpec]
+    owner_agent_id: str | None = None
     completed_task_ids: set[str] = field(default_factory=set)
     failed_task_ids: set[str] = field(default_factory=set)
     released_task_ids: set[str] = field(default_factory=set)

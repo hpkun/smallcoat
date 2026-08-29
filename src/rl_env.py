@@ -38,6 +38,13 @@ class AgentDecisionContext:
     action_spec: ActionSpec
 
 
+@dataclass(frozen=True)
+class DecisionAgentBinding:
+    agent_id: str
+    cluster_id: int | None
+    decision_uav_id: str
+
+
 class CMADDPGEnv:
     def __init__(
         self,
@@ -106,63 +113,167 @@ class CMADDPGEnv:
     def _assign_owner_ch_to_workflows(self, workflows) -> None:
         for workflow in workflows:
             ingress_uav = self.base_env.get_uav_by_id(workflow.owner_ingress_uav_id)
-            owner_ch = self.base_env.get_decision_uav(ingress_uav)
+            resolved = self._resolve_agent_binding(ingress_uav)
+            if resolved is None:
+                continue
+            binding, owner_ch = resolved
             workflow.owner_ch_id = owner_ch.node_id
+            workflow.owner_agent_id = binding.agent_id
             for task_id, spec in workflow.task_specs.items():
                 workflow.task_specs[task_id] = replace(
                     spec,
                     task_instance=replace(
                         spec.task_instance,
                         owner_ch_id=owner_ch.node_id,
+                        owner_agent_id=binding.agent_id,
                     ),
                 )
 
     def _refresh_active_workflow_owner_ch(self) -> None:
         for workflow in self.workflow_manager.active_workflows.values():
             ingress_uav = self.base_env.get_uav_by_id(workflow.owner_ingress_uav_id)
-            owner_ch = self.base_env.get_decision_uav(ingress_uav)
-            if workflow.owner_ch_id == owner_ch.node_id:
+            resolved = self._resolve_agent_binding(ingress_uav)
+            if resolved is None:
+                continue
+            binding, owner_ch = resolved
+            if (
+                workflow.owner_ch_id == owner_ch.node_id
+                and workflow.owner_agent_id == binding.agent_id
+            ):
                 continue
             workflow.owner_ch_id = owner_ch.node_id
+            workflow.owner_agent_id = binding.agent_id
             for task_id, spec in workflow.task_specs.items():
                 workflow.task_specs[task_id] = replace(
                     spec,
                     task_instance=replace(
                         spec.task_instance,
                         owner_ch_id=owner_ch.node_id,
+                        owner_agent_id=binding.agent_id,
                     ),
                 )
 
-    def _collect_member_uavs(self, decision_uav_id: str) -> list[UAV]:
-        return [
-            uav
-            for uav in self.base_env.uavs
-            if uav.head_uav_id == decision_uav_id or uav.node_id == decision_uav_id
-        ]
+    def _collect_member_uavs(
+        self, binding: DecisionAgentBinding
+    ) -> list[UAV]:
+        manager = self.base_env.clustering_manager
+        if manager is not None and binding.cluster_id is not None:
+            cluster = manager.cluster_infos.get(binding.cluster_id)
+            if cluster is not None:
+                member_ids = set(cluster.member_uav_ids)
+                return [uav for uav in self.base_env.uavs if uav.node_id in member_ids]
+        return [self.base_env.get_uav_by_id(binding.decision_uav_id)]
 
     def _decision_uavs(self) -> list[UAV]:
-        if self.base_env.clustering_manager is None:
-            return [uav for uav in self.base_env.uavs if uav.can_serve]
-
-        decision_uavs = [
-            uav
-            for uav in self.base_env.uavs
-            if (uav.is_cluster_head or uav.is_isolated) and uav.can_serve
+        return [
+            self.base_env.get_uav_by_id(binding.decision_uav_id)
+            for binding in self._decision_agents()
         ]
-        if decision_uavs:
-            return decision_uavs
-        return [uav for uav in self.base_env.uavs if uav.can_serve]
 
-    def _tasks_grouped_by_ch(self) -> dict[str, list[tuple[TaskInstance, UAV]]]:
+    def _decision_agents(self) -> list[DecisionAgentBinding]:
+        manager = self.base_env.clustering_manager
+        if manager is None:
+            return [
+                DecisionAgentBinding(
+                    agent_id=f"isolated-agent-{uav.node_id}",
+                    cluster_id=None,
+                    decision_uav_id=uav.node_id,
+                )
+                for uav in sorted(self.base_env.uavs, key=lambda item: item.node_id)
+                if uav.can_serve
+            ]
+
+        uavs_by_id = {uav.node_id: uav for uav in self.base_env.uavs}
+        bindings: list[DecisionAgentBinding] = []
+        clustered_member_ids: set[str] = set()
+        for cluster in sorted(
+            manager.cluster_infos.values(), key=lambda item: item.logical_agent_id
+        ):
+            clustered_member_ids.update(cluster.member_uav_ids)
+            serviceable_members = [
+                uavs_by_id[uav_id]
+                for uav_id in cluster.member_uav_ids
+                if uav_id in uavs_by_id and uavs_by_id[uav_id].can_serve
+            ]
+            if not serviceable_members:
+                continue
+            current_head = uavs_by_id.get(cluster.head_uav_id)
+            decision_uav = (
+                current_head
+                if current_head is not None and current_head.can_serve
+                else min(
+                    serviceable_members,
+                    key=lambda uav: (
+                        uav.position.distance_to(cluster.centroid),
+                        uav.node_id,
+                    ),
+                )
+            )
+            bindings.append(
+                DecisionAgentBinding(
+                    agent_id=cluster.logical_agent_id,
+                    cluster_id=cluster.cluster_id,
+                    decision_uav_id=decision_uav.node_id,
+                )
+            )
+        bindings.extend(
+            DecisionAgentBinding(
+                agent_id=f"isolated-agent-{uav.node_id}",
+                cluster_id=None,
+                decision_uav_id=uav.node_id,
+            )
+            for uav in sorted(self.base_env.uavs, key=lambda item: item.node_id)
+            if uav.can_serve and uav.node_id not in clustered_member_ids
+        )
+        return bindings
+
+    def _logical_agent_id(self, decision_uav: UAV) -> str:
+        manager = self.base_env.clustering_manager
+        if manager is not None:
+            logical_agent_id = manager.get_logical_agent_id(decision_uav.node_id)
+            if logical_agent_id is not None:
+                return logical_agent_id
+        return f"isolated-agent-{decision_uav.node_id}"
+
+    def _resolve_agent_binding(
+        self, ingress_uav: UAV
+    ) -> tuple[DecisionAgentBinding, UAV] | None:
+        manager = self.base_env.clustering_manager
+        agent_id = (
+            manager.get_logical_agent_id(ingress_uav.node_id)
+            if manager is not None
+            else None
+        )
+        if agent_id is None:
+            agent_id = f"isolated-agent-{ingress_uav.node_id}"
+        binding = next(
+            (
+                candidate
+                for candidate in self._decision_agents()
+                if candidate.agent_id == agent_id
+            ),
+            None,
+        )
+        if binding is None:
+            return None
+        return binding, self.base_env.get_uav_by_id(binding.decision_uav_id)
+
+    def _tasks_grouped_by_agent(self) -> dict[str, list[tuple[TaskInstance, UAV]]]:
         grouped: dict[str, list[tuple[TaskInstance, UAV]]] = {}
-        active_decision_uav_ids = {uav.node_id for uav in self._decision_uavs()}
         for task_instance in self.pending_tasks:
             ingress_uav = self.base_env.get_uav_by_id(task_instance.ingress_uav_id)
-            owner_ch_id = task_instance.owner_ch_id
-            if owner_ch_id is None or owner_ch_id not in active_decision_uav_ids:
-                owner_ch_id = self.base_env.get_decision_uav(ingress_uav).node_id
-                task_instance = replace(task_instance, owner_ch_id=owner_ch_id)
-            grouped.setdefault(owner_ch_id, []).append((task_instance, ingress_uav))
+            resolved = self._resolve_agent_binding(ingress_uav)
+            if resolved is None:
+                continue
+            binding, decision_uav = resolved
+            task_instance = replace(
+                task_instance,
+                owner_agent_id=binding.agent_id,
+                owner_ch_id=decision_uav.node_id,
+            )
+            grouped.setdefault(binding.agent_id, []).append(
+                (task_instance, ingress_uav)
+            )
         return grouped
 
     def _build_task_block(
@@ -348,12 +459,13 @@ class CMADDPGEnv:
         states: dict[str, np.ndarray] = {}
         action_specs: dict[str, ActionSpec] = {}
         self.pending_contexts = {}
-        grouped_tasks = self._tasks_grouped_by_ch()
+        grouped_tasks = self._tasks_grouped_by_agent()
 
-        for decision_uav in self._decision_uavs():
-            agent_id = decision_uav.node_id
-            member_uavs = self._collect_member_uavs(decision_uav.node_id)
-            selected_pairs = grouped_tasks.get(decision_uav.node_id, [])
+        for binding in self._decision_agents():
+            agent_id = binding.agent_id
+            decision_uav = self.base_env.get_uav_by_id(binding.decision_uav_id)
+            member_uavs = self._collect_member_uavs(binding)
+            selected_pairs = grouped_tasks.get(agent_id, [])
             if not selected_pairs:
                 continue
             selected_pairs = self._attach_workflow_embeddings(

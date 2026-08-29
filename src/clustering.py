@@ -16,6 +16,7 @@ class ClusterInfo:
     """单个簇的静态视图。"""
 
     cluster_id: int
+    logical_agent_id: str
     head_uav_id: str
     member_uav_ids: list[str]
     centroid: Position
@@ -43,6 +44,79 @@ class KMDUCManager:
         self.area_config = area_config
         self.cluster_infos: dict[int, ClusterInfo] = {}
         self.ch_not_center_counters: dict[int, int] = {}
+        self._next_logical_agent_index = 0
+
+    def _new_logical_agent_id(self) -> str:
+        logical_agent_id = f"ch-agent-{self._next_logical_agent_index}"
+        self._next_logical_agent_index += 1
+        return logical_agent_id
+
+    @staticmethod
+    def _jaccard_similarity(first: ClusterInfo, second: ClusterInfo) -> float:
+        first_members = set(first.member_uav_ids)
+        second_members = set(second.member_uav_ids)
+        union = first_members | second_members
+        return float(len(first_members & second_members) / len(union)) if union else 0.0
+
+    def _assign_logical_agent_ids(
+        self,
+        old_clusters: dict[int, ClusterInfo],
+        new_clusters: dict[int, ClusterInfo],
+    ) -> dict[int, ClusterInfo]:
+        if not old_clusters:
+            assigned: dict[int, ClusterInfo] = {}
+            for cluster in sorted(
+                new_clusters.values(),
+                key=lambda item: (
+                    item.centroid.x_m,
+                    item.centroid.y_m,
+                    item.cluster_id,
+                ),
+            ):
+                assigned[cluster.cluster_id] = ClusterInfo(
+                    cluster_id=cluster.cluster_id,
+                    logical_agent_id=self._new_logical_agent_id(),
+                    head_uav_id=cluster.head_uav_id,
+                    member_uav_ids=cluster.member_uav_ids,
+                    centroid=cluster.centroid,
+                )
+            return assigned
+
+        candidates: list[tuple[float, float, str, int, int]] = []
+        for old_cluster in old_clusters.values():
+            for new_cluster in new_clusters.values():
+                candidates.append(
+                    (
+                        -self._jaccard_similarity(old_cluster, new_cluster),
+                        old_cluster.centroid.distance_to(new_cluster.centroid),
+                        old_cluster.logical_agent_id,
+                        old_cluster.cluster_id,
+                        new_cluster.cluster_id,
+                    )
+                )
+        matched_old_ids: set[int] = set()
+        matched_new_ids: set[int] = set()
+        logical_ids_by_new_cluster: dict[int, str] = {}
+        for _, _, logical_agent_id, old_cluster_id, new_cluster_id in sorted(candidates):
+            if old_cluster_id in matched_old_ids or new_cluster_id in matched_new_ids:
+                continue
+            matched_old_ids.add(old_cluster_id)
+            matched_new_ids.add(new_cluster_id)
+            logical_ids_by_new_cluster[new_cluster_id] = logical_agent_id
+
+        assigned = {}
+        for cluster_id, cluster in new_clusters.items():
+            logical_agent_id = logical_ids_by_new_cluster.get(cluster_id)
+            if logical_agent_id is None:
+                logical_agent_id = self._new_logical_agent_id()
+            assigned[cluster_id] = ClusterInfo(
+                cluster_id=cluster_id,
+                logical_agent_id=logical_agent_id,
+                head_uav_id=cluster.head_uav_id,
+                member_uav_ids=cluster.member_uav_ids,
+                centroid=cluster.centroid,
+            )
+        return assigned
 
     def optimal_cluster_count(self, num_uavs: int) -> int:
         """按公式 (17) 计算最优簇数 c_n^*。"""
@@ -170,6 +244,7 @@ class KMDUCManager:
         cluster_count = self.optimal_cluster_count(len(uavs))
         labels, centroids = self.run_kmeans(points, cluster_count, rng)
 
+        old_cluster_infos = self.cluster_infos
         cluster_infos: dict[int, ClusterInfo] = {}
         for cluster_id in range(cluster_count):
             member_indices = np.where(labels == cluster_id)[0]
@@ -187,15 +262,20 @@ class KMDUCManager:
 
             cluster_infos[cluster_id] = ClusterInfo(
                 cluster_id=cluster_id,
+                logical_agent_id="",
                 head_uav_id=head_uav.node_id,
                 member_uav_ids=member_uav_ids,
                 centroid=centroid,
             )
 
-        self.cluster_infos = cluster_infos
-        self.ch_not_center_counters = {cluster_id: 0 for cluster_id in cluster_infos}
+        self.cluster_infos = self._assign_logical_agent_ids(
+            old_cluster_infos, cluster_infos
+        )
+        self.ch_not_center_counters = {
+            cluster_id: 0 for cluster_id in self.cluster_infos
+        }
         self._apply_cluster_infos(uavs)
-        return cluster_infos
+        return self.cluster_infos
 
     def maintain_clusters(self, uavs: list[UAV]) -> dict[int, ClusterInfo]:
         """
@@ -275,6 +355,7 @@ class KMDUCManager:
 
             updated_cluster_infos[cluster_id] = ClusterInfo(
                 cluster_id=cluster_id,
+                logical_agent_id=cluster.logical_agent_id,
                 head_uav_id=head_uav_id,
                 member_uav_ids=member_uav_ids,
                 centroid=centroid,
@@ -314,3 +395,21 @@ class KMDUCManager:
             if uav_id in cluster.member_uav_ids:
                 return cluster.head_uav_id
         return None
+
+    def get_logical_agent_id(self, uav_id: str) -> str | None:
+        for cluster in self.cluster_infos.values():
+            if uav_id in cluster.member_uav_ids:
+                return cluster.logical_agent_id
+        return None
+
+    def get_logical_agent_id_by_head(self, head_uav_id: str) -> str | None:
+        for cluster in self.cluster_infos.values():
+            if cluster.head_uav_id == head_uav_id:
+                return cluster.logical_agent_id
+        return None
+
+    def active_agent_bindings(self) -> dict[str, str]:
+        return {
+            cluster.logical_agent_id: cluster.head_uav_id
+            for cluster in self.cluster_infos.values()
+        }

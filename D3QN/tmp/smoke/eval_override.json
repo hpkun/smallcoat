@@ -1,0 +1,74 @@
+{
+  "method": "checkpoint",
+  "checkpoint": "tmp/smoke/drl-ra_seed42/model.pt",
+  "runs": [
+    {
+      "seed": 0.0,
+      "tasks": 20.0,
+      "tcr": 100.0,
+      "latency_ms": 1388.425472949513,
+      "energy_mj": 539.7017932132529,
+      "reliability_pct": 92.07867289484042,
+      "resource_utilization_pct": 0.056750162610768866,
+      "cvr": 65.0,
+      "expected_cost": 0.040849938477069324,
+      "mean_replicas": 1.5,
+      "decision_latency_ms": 0.37249499999999997
+    },
+    {
+      "seed": 1.0,
+      "tasks": 20.0,
+      "tcr": 90.0,
+      "latency_ms": 4286.66842181346,
+      "energy_mj": 6829.750068907575,
+      "reliability_pct": 83.47465260209181,
+      "resource_utilization_pct": 0.07245166720655855,
+      "cvr": 60.0,
+      "expected_cost": 0.13744944060283265,
+      "mean_replicas": 1.75,
+      "decision_latency_ms": 0.314495
+    }
+  ],
+  "aggregate": {
+    "tasks": {
+      "mean": 20.0,
+      "std": 0.0
+    },
+    "tcr": {
+      "mean": 95.0,
+      "std": 7.0710678118654755
+    },
+    "latency_ms": {
+      "mean": 2837.5469473814865,
+      "std": 2049.367242667793
+    },
+    "energy_mj": {
+      "mean": 3684.725931060414,
+      "std": 4447.735789734205
+    },
+    "reliability_pct": {
+      "mean": 87.77666274846612,
+      "std": 6.083961094469209
+    },
+    "resource_utilization_pct": {
+      "mean": 0.06460091490866371,
+      "std": 0.011102640374514623
+    },
+    "cvr": {
+      "mean": 62.5,
+      "std": 3.5355339059327378
+    },
+    "expected_cost": {
+      "mean": 0.08914968953995099,
+      "std": 0.06830616301237157
+    },
+    "mean_replicas": {
+      "mean": 1.625,
+      "std": 0.1767766952966369
+    },
+    "decision_latency_ms": {
+      "mean": 0.343495,
+      "std": 0.041012193308819715
+    }
+  }
+}

@@ -1,0 +1,362 @@
+{
+  "profile": "smoke",
+  "seeds": [
+    0
+  ],
+  "methods": {
+    "random": {
+      "runs": [
+        {
+          "seed": 0.0,
+          "tasks": 70.0,
+          "tcr": 91.42857142857143,
+          "latency_ms": 3294.272148175347,
+          "energy_mj": 515.9331086736786,
+          "reliability_pct": 82.45756015555553,
+          "resource_utilization_pct": 0.06055077573324746,
+          "cvr": 68.57142857142857,
+          "expected_cost": 0.13233776636426273,
+          "mean_replicas": 1.5,
+          "decision_latency_ms": 0.03571714285714285
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 91.42857142857143,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 3294.272148175347,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 515.9331086736786,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 82.45756015555553,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 0.06055077573324746,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 68.57142857142857,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.13233776636426273,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.5,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.03571714285714285,
+          "std": 0.0
+        }
+      }
+    },
+    "greedy-nearest": {
+      "runs": [
+        {
+          "seed": 0.0,
+          "tasks": 70.0,
+          "tcr": 94.28571428571428,
+          "latency_ms": 523.9727603577601,
+          "energy_mj": 257.7162374193633,
+          "reliability_pct": 88.02137034339742,
+          "resource_utilization_pct": 0.06305108135534192,
+          "cvr": 45.714285714285715,
+          "expected_cost": 0.08723757002637492,
+          "mean_replicas": 1.2714285714285714,
+          "decision_latency_ms": 0.00756142857142857
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 94.28571428571428,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 523.9727603577601,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 257.7162374193633,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 88.02137034339742,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 0.06305108135534192,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 45.714285714285715,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.08723757002637492,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.2714285714285714,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.00756142857142857,
+          "std": 0.0
+        }
+      }
+    },
+    "greedy-reliability": {
+      "runs": [
+        {
+          "seed": 0.0,
+          "tasks": 70.0,
+          "tcr": 92.85714285714286,
+          "latency_ms": 3201.6763728610467,
+          "energy_mj": 303.3443628024367,
+          "reliability_pct": 92.64012216701369,
+          "resource_utilization_pct": 0.05826646420901568,
+          "cvr": 15.714285714285714,
+          "expected_cost": 0.07836150342138316,
+          "mean_replicas": 1.2857142857142858,
+          "decision_latency_ms": 0.008808571428571428
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 92.85714285714286,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 3201.6763728610467,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 303.3443628024367,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 92.64012216701369,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 0.05826646420901568,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 15.714285714285714,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.07836150342138316,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.2857142857142858,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.008808571428571428,
+          "std": 0.0
+        }
+      }
+    },
+    "dqn": {
+      "runs": [
+        {
+          "seed": 10000.0,
+          "tasks": 70.0,
+          "tcr": 60.0,
+          "latency_ms": 12733.103549630356,
+          "energy_mj": 672.7792020530908,
+          "reliability_pct": 51.75060403454197,
+          "resource_utilization_pct": 0.04387291525705489,
+          "cvr": 92.85714285714286,
+          "expected_cost": 0.42462958075955126,
+          "mean_replicas": 1.0,
+          "decision_latency_ms": 0.37202142857142856
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 60.0,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 12733.103549630356,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 672.7792020530908,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 51.75060403454197,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 0.04387291525705489,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 92.85714285714286,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.42462958075955126,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.37202142857142856,
+          "std": 0.0
+        }
+      }
+    },
+    "d3qn": {
+      "runs": [
+        {
+          "seed": 10000.0,
+          "tasks": 70.0,
+          "tcr": 58.57142857142858,
+          "latency_ms": 14625.107663291064,
+          "energy_mj": 766.5532293105261,
+          "reliability_pct": 49.609078532099076,
+          "resource_utilization_pct": 0.00027723693267349794,
+          "cvr": 98.57142857142858,
+          "expected_cost": 0.4424864798068647,
+          "mean_replicas": 1.0,
+          "decision_latency_ms": 0.4417542857142858
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 58.57142857142858,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 14625.107663291064,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 766.5532293105261,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 49.609078532099076,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 0.00027723693267349794,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 98.57142857142858,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.4424864798068647,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.4417542857142858,
+          "std": 0.0
+        }
+      }
+    },
+    "drl-ra": {
+      "runs": [
+        {
+          "seed": 10000.0,
+          "tasks": 70.0,
+          "tcr": 88.57142857142857,
+          "latency_ms": 9722.351498307007,
+          "energy_mj": 1033.0549419245817,
+          "reliability_pct": 80.11791370305994,
+          "resource_utilization_pct": 0.08214355420311786,
+          "cvr": 68.57142857142857,
+          "expected_cost": 0.15167305949576557,
+          "mean_replicas": 1.7428571428571429,
+          "decision_latency_ms": 0.3282428571428571
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 88.57142857142857,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 9722.351498307007,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 1033.0549419245817,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 80.11791370305994,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 0.08214355420311786,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 68.57142857142857,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.15167305949576557,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.7428571428571429,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.3282428571428571,
+          "std": 0.0
+        }
+      }
+    }
+  }
+}

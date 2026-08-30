@@ -1,0 +1,42 @@
+seed: 42
+environment:
+  area_km: 10.0
+  num_devices: 100
+  num_edges: 10
+  num_uavs: 6
+  num_satellites: 3
+  arrival_rate: 12.5
+  arrival_amplitude: 0.3
+  arrival_period_s: 86400.0
+  episode_steps: 500
+  edge_coverage_km: 1.5
+  satellite_window_s: 600.0
+  satellite_safety_margin_s: 30.0
+  tau_smooth: 0.1
+  cost_temperature: 0.05
+  replica_threshold: 0.95
+  max_replicas: 3
+  enable_redundancy: true
+  capacity_gating: true
+training:
+  episodes: 300
+  learning_rate: 0.0001
+  lagrange_learning_rate: 0.01
+  gamma: 0.99
+  replay_capacity: 100000
+  batch_size: 64
+  target_update_steps: 500
+  lagrange_update_steps: 100
+  cost_window: 100
+  cost_budget: 0.05
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.995
+  hidden_sizes: [256, 128, 64]
+  lambda_initial: 1.0
+  gradient_clip: 10.0
+reward:
+  latency: 0.3
+  energy: 0.2
+  reliability: 0.3
+  violation: 0.2

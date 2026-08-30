@@ -1,0 +1,244 @@
+{
+  "profile": "smoke",
+  "seeds": [
+    0
+  ],
+  "methods": {
+    "random": {
+      "runs": [
+        {
+          "seed": 0.0,
+          "tasks": 70.0,
+          "tcr": 82.85714285714286,
+          "latency_ms": 5239.2904023138235,
+          "energy_mj": 581.3653821825969,
+          "reliability_pct": 72.84304630307734,
+          "resource_utilization_pct": 34.57142857142858,
+          "cvr": 77.14285714285715,
+          "expected_cost": 0.2220577818033378,
+          "mean_replicas": 1.2571428571428571,
+          "decision_latency_ms": 0.04017428571428571
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 82.85714285714286,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 5239.2904023138235,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 581.3653821825969,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 72.84304630307734,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 34.57142857142858,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 77.14285714285715,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.2220577818033378,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.2571428571428571,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.04017428571428571,
+          "std": 0.0
+        }
+      }
+    },
+    "ra-opt": {
+      "runs": [
+        {
+          "seed": 0.0,
+          "tasks": 70.0,
+          "tcr": 84.28571428571429,
+          "latency_ms": 1643.0170988722352,
+          "energy_mj": 196.35634987765897,
+          "reliability_pct": 80.89633781617145,
+          "resource_utilization_pct": 49.71428571428572,
+          "cvr": 30.0,
+          "expected_cost": 0.17478674395022045,
+          "mean_replicas": 1.1428571428571428,
+          "decision_latency_ms": 0.010884285714285714
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 84.28571428571429,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 1643.0170988722352,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 196.35634987765897,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 80.89633781617145,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 49.71428571428572,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 30.0,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.17478674395022045,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.1428571428571428,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.010884285714285714,
+          "std": 0.0
+        }
+      }
+    },
+    "d3qn": {
+      "runs": [
+        {
+          "seed": 10000.0,
+          "tasks": 70.0,
+          "tcr": 62.857142857142854,
+          "latency_ms": 17782.463963131286,
+          "energy_mj": 919.5262021398513,
+          "reliability_pct": 52.04200106775859,
+          "resource_utilization_pct": 11.857142857142854,
+          "cvr": 95.71428571428572,
+          "expected_cost": 0.4225307051739428,
+          "mean_replicas": 1.0,
+          "decision_latency_ms": 0.31617428571428574
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 62.857142857142854,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 17782.463963131286,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 919.5262021398513,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 52.04200106775859,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 11.857142857142854,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 95.71428571428572,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.4225307051739428,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.0,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.31617428571428574,
+          "std": 0.0
+        }
+      }
+    },
+    "drl-ra": {
+      "runs": [
+        {
+          "seed": 10000.0,
+          "tasks": 70.0,
+          "tcr": 91.42857142857143,
+          "latency_ms": 11434.640853795232,
+          "energy_mj": 1110.7155390993942,
+          "reliability_pct": 81.92573882013146,
+          "resource_utilization_pct": 63.571428571428555,
+          "cvr": 71.42857142857143,
+          "expected_cost": 0.1424813231444575,
+          "mean_replicas": 1.5714285714285714,
+          "decision_latency_ms": 0.5106857142857143
+        }
+      ],
+      "aggregate": {
+        "tasks": {
+          "mean": 70.0,
+          "std": 0.0
+        },
+        "tcr": {
+          "mean": 91.42857142857143,
+          "std": 0.0
+        },
+        "latency_ms": {
+          "mean": 11434.640853795232,
+          "std": 0.0
+        },
+        "energy_mj": {
+          "mean": 1110.7155390993942,
+          "std": 0.0
+        },
+        "reliability_pct": {
+          "mean": 81.92573882013146,
+          "std": 0.0
+        },
+        "resource_utilization_pct": {
+          "mean": 63.571428571428555,
+          "std": 0.0
+        },
+        "cvr": {
+          "mean": 71.42857142857143,
+          "std": 0.0
+        },
+        "expected_cost": {
+          "mean": 0.1424813231444575,
+          "std": 0.0
+        },
+        "mean_replicas": {
+          "mean": 1.5714285714285714,
+          "std": 0.0
+        },
+        "decision_latency_ms": {
+          "mean": 0.5106857142857143,
+          "std": 0.0
+        }
+      }
+    }
+  }
+}

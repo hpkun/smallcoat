@@ -75,10 +75,14 @@ class CMADDPGSystem:
         self,
         device: str = "cpu",
         agent_hyper_params: AgentHyperParameters | None = None,
+        max_actor_count: int | None = None,
     ) -> None:
         self.device = torch.device(device)
         self.agent_hyper_params = agent_hyper_params or AgentHyperParameters()
         self.actors: dict[str, CHActorAgent] = {}
+        self.max_actor_count = max_actor_count
+        self.allowed_agent_ids: frozenset[str] | None = None
+        self.active_agent_ids: frozenset[str] | None = None
         self.global_critic: VariableTaskCriticNetwork | None = None
         self.target_global_critic: VariableTaskCriticNetwork | None = None
         self.global_critic_optimizer: Adam | None = None
@@ -102,6 +106,52 @@ class CMADDPGSystem:
 
     def _sorted_agent_ids(self) -> list[str]:
         return sorted(self.actors)
+
+    @property
+    def total_actor_count(self) -> int:
+        return len(self.actors)
+
+    @property
+    def active_actor_count(self) -> int:
+        return len(self.active_agent_ids or ())
+
+    def configure_agent_pool(self, agent_ids: list[str] | tuple[str, ...]) -> None:
+        """Freeze the logical CH identities allowed to own Actor networks."""
+
+        logical_ids = frozenset(agent_ids)
+        if not logical_ids:
+            raise ValueError("The logical Actor pool cannot be empty.")
+        unexpected_existing = set(self.actors) - logical_ids
+        if unexpected_existing:
+            raise RuntimeError(
+                "Existing Actors are outside the configured logical pool: "
+                f"{sorted(unexpected_existing)}"
+            )
+        self.allowed_agent_ids = logical_ids
+        self.max_actor_count = len(logical_ids)
+
+    def set_active_agent_ids(self, agent_ids) -> None:
+        active_ids = frozenset(agent_ids)
+        if self.allowed_agent_ids is not None:
+            unexpected = active_ids - self.allowed_agent_ids
+            if unexpected:
+                raise RuntimeError(
+                    "Active logical agents are outside the configured Actor pool: "
+                    f"{sorted(unexpected)}"
+                )
+        self.active_agent_ids = active_ids
+
+    def _check_actor_creation(self, agent_id: str) -> None:
+        if self.allowed_agent_ids is not None and agent_id not in self.allowed_agent_ids:
+            raise RuntimeError(
+                f"Refusing to create unexpected Actor {agent_id!r}; allowed logical "
+                f"roles are {sorted(self.allowed_agent_ids)}."
+            )
+        if self.max_actor_count is not None and len(self.actors) >= self.max_actor_count:
+            raise RuntimeError(
+                f"Actor count would exceed configured limit {self.max_actor_count}: "
+                f"attempted {agent_id!r}, existing={sorted(self.actors)}"
+            )
 
     def joint_state_dim(self, agent_ids=None) -> int:
         del agent_ids
@@ -141,6 +191,7 @@ class CMADDPGSystem:
                 lr=self.agent_hyper_params.critic_lr,
             )
         if agent_id not in self.actors:
+            self._check_actor_creation(agent_id)
             self.actors[agent_id] = CHActorAgent(
                 per_task_state_dim=OBSERVATION_INPUT_DIM,
                 per_task_action_dim=action_width,
@@ -194,6 +245,14 @@ class CMADDPGSystem:
                 "agent_hyper_params": asdict(self.agent_hyper_params),
                 "state_dims": dict(self.state_dims),
                 "action_dims": dict(self.action_dims),
+                "actor_count": self.total_actor_count,
+                "active_actor_count": self.active_actor_count,
+                "max_actor_count": self.max_actor_count,
+                "allowed_agent_ids": (
+                    sorted(self.allowed_agent_ids)
+                    if self.allowed_agent_ids is not None
+                    else None
+                ),
                 "actors": {
                     agent_id: {
                         "actor_state_dict": actor.actor.state_dict(),
@@ -407,6 +466,7 @@ class CMADDPGSystem:
         update_ids = [
             agent_id
             for agent_id in self._sorted_agent_ids()
+            if self.active_agent_ids is None or agent_id in self.active_agent_ids
             if any(agent_id in transition.local_states for transition in batch)
         ]
         if not update_ids:

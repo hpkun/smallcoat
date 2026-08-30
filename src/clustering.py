@@ -46,11 +46,35 @@ class KMDUCManager:
         self.cluster_infos: dict[int, ClusterInfo] = {}
         self.ch_not_center_counters: dict[int, int] = {}
         self._next_logical_agent_index = 0
+        # Logical CH roles outlive their current physical cluster binding.  A
+        # maintenance pass may temporarily drop an empty cluster, but that
+        # must not mint a new neural-network identity at the next recluster.
+        self._logical_role_snapshots: dict[str, ClusterInfo | None] = {}
 
     def _new_logical_agent_id(self) -> str:
         logical_agent_id = f"ch-agent-{self._next_logical_agent_index}"
         self._next_logical_agent_index += 1
         return logical_agent_id
+
+    def _ensure_logical_role_pool(self, role_count: int) -> None:
+        while len(self._logical_role_snapshots) < role_count:
+            logical_agent_id = self._new_logical_agent_id()
+            self._logical_role_snapshots[logical_agent_id] = None
+
+    @property
+    def logical_agent_ids(self) -> tuple[str, ...]:
+        """All persistent logical CH roles, including currently inactive ones."""
+
+        return tuple(
+            sorted(
+                self._logical_role_snapshots,
+                key=lambda agent_id: int(agent_id.rsplit("-", 1)[-1]),
+            )
+        )
+
+    def _remember_role_bindings(self, clusters: dict[int, ClusterInfo]) -> None:
+        for cluster in clusters.values():
+            self._logical_role_snapshots[cluster.logical_agent_id] = cluster
 
     @staticmethod
     def _jaccard_similarity(first: ClusterInfo, second: ClusterInfo) -> float:
@@ -64,8 +88,15 @@ class KMDUCManager:
         old_clusters: dict[int, ClusterInfo],
         new_clusters: dict[int, ClusterInfo],
     ) -> dict[int, ClusterInfo]:
-        if not old_clusters:
+        # Match against the persistent registry, not only clusters surviving
+        # the latest maintenance pass.  Prefer the freshest live snapshots.
+        snapshots_by_role = dict(self._logical_role_snapshots)
+        for cluster in old_clusters.values():
+            snapshots_by_role[cluster.logical_agent_id] = cluster
+
+        if not any(snapshot is not None for snapshot in snapshots_by_role.values()):
             assigned: dict[int, ClusterInfo] = {}
+            available_ids = iter(self.logical_agent_ids)
             for cluster in sorted(
                 new_clusters.values(),
                 key=lambda item: (
@@ -74,42 +105,52 @@ class KMDUCManager:
                     item.cluster_id,
                 ),
             ):
-                assigned[cluster.cluster_id] = ClusterInfo(
-                    cluster_id=cluster.cluster_id,
-                    logical_agent_id=self._new_logical_agent_id(),
-                    head_uav_id=cluster.head_uav_id,
-                    member_uav_ids=cluster.member_uav_ids,
-                    centroid=cluster.centroid,
+                assigned[cluster.cluster_id] = replace(
+                    cluster,
+                    logical_agent_id=next(available_ids),
                 )
+            self._remember_role_bindings(assigned)
             return assigned
 
         candidates: list[tuple[float, float, str, int, int]] = []
-        for old_cluster in old_clusters.values():
+        for logical_agent_id, old_cluster in snapshots_by_role.items():
+            if old_cluster is None:
+                continue
             for new_cluster in new_clusters.values():
                 candidates.append(
                     (
                         -self._jaccard_similarity(old_cluster, new_cluster),
                         old_cluster.centroid.distance_to(new_cluster.centroid),
-                        old_cluster.logical_agent_id,
+                        logical_agent_id,
                         old_cluster.cluster_id,
                         new_cluster.cluster_id,
                     )
                 )
-        matched_old_ids: set[int] = set()
+        matched_logical_ids: set[str] = set()
         matched_new_ids: set[int] = set()
         logical_ids_by_new_cluster: dict[int, str] = {}
-        for _, _, logical_agent_id, old_cluster_id, new_cluster_id in sorted(candidates):
-            if old_cluster_id in matched_old_ids or new_cluster_id in matched_new_ids:
+        for _, _, logical_agent_id, _old_cluster_id, new_cluster_id in sorted(candidates):
+            if logical_agent_id in matched_logical_ids or new_cluster_id in matched_new_ids:
                 continue
-            matched_old_ids.add(old_cluster_id)
+            matched_logical_ids.add(logical_agent_id)
             matched_new_ids.add(new_cluster_id)
             logical_ids_by_new_cluster[new_cluster_id] = logical_agent_id
 
+        unused_role_ids = iter(
+            logical_agent_id
+            for logical_agent_id in self.logical_agent_ids
+            if logical_agent_id not in matched_logical_ids
+        )
         assigned = {}
-        for cluster_id, cluster in new_clusters.items():
+        for cluster_id, cluster in sorted(new_clusters.items()):
             logical_agent_id = logical_ids_by_new_cluster.get(cluster_id)
             if logical_agent_id is None:
-                logical_agent_id = self._new_logical_agent_id()
+                try:
+                    logical_agent_id = next(unused_role_ids)
+                except StopIteration as exc:
+                    raise RuntimeError(
+                        "No persistent logical CH role is available for a new cluster."
+                    ) from exc
             assigned[cluster_id] = ClusterInfo(
                 cluster_id=cluster_id,
                 logical_agent_id=logical_agent_id,
@@ -117,6 +158,7 @@ class KMDUCManager:
                 member_uav_ids=cluster.member_uav_ids,
                 centroid=cluster.centroid,
             )
+        self._remember_role_bindings(assigned)
         return assigned
 
     def optimal_cluster_count(self, num_uavs: int) -> int:
@@ -243,6 +285,7 @@ class KMDUCManager:
 
         points = np.array([[uav.position.x_m, uav.position.y_m] for uav in uavs], dtype=float)
         cluster_count = self.optimal_cluster_count(len(uavs))
+        self._ensure_logical_role_pool(cluster_count)
         labels, centroids = self.run_kmeans(points, cluster_count, rng)
 
         old_cluster_infos = self.cluster_infos
@@ -363,6 +406,7 @@ class KMDUCManager:
             )
 
         self.cluster_infos = updated_cluster_infos
+        self._remember_role_bindings(updated_cluster_infos)
         self._apply_cluster_infos(uavs)
         return updated_cluster_infos
 

@@ -112,3 +112,51 @@ def test_physical_head_reselection_preserves_logical_agent(monkeypatch) -> None:
     assert manager.active_agent_bindings() == {
         initial.logical_agent_id: "uav-2"
     }
+
+
+def test_empty_cluster_then_reclustering_reuses_persistent_role_pool(monkeypatch) -> None:
+    manager = _manager()
+    uavs = [
+        _uav("uav-0", 0.0),
+        _uav("uav-1", 10.0),
+        _uav("uav-2", 100.0),
+        _uav("uav-3", 110.0),
+    ]
+    monkeypatch.setattr(manager, "optimal_cluster_count", lambda _count: 2)
+    monkeypatch.setattr(
+        manager,
+        "run_kmeans",
+        lambda _points, _count, _rng: (
+            np.asarray([0, 0, 1, 1]),
+            np.asarray([[5.0, 0.0], [105.0, 0.0]]),
+        ),
+    )
+
+    manager.centralized_clustering(uavs, np.random.default_rng(5))
+    expected_ids = {"ch-agent-0", "ch-agent-1"}
+
+    for iteration in range(100):
+        # Reproduce the failure mode: maintenance has temporarily lost one
+        # cluster before centralized clustering restores K clusters.
+        retained_cluster_id = min(manager.cluster_infos)
+        manager.cluster_infos = {
+            retained_cluster_id: manager.cluster_infos[retained_cluster_id]
+        }
+        manager.ch_not_center_counters = {retained_cluster_id: 0}
+        clusters = manager.centralized_clustering(
+            uavs, np.random.default_rng(100 + iteration)
+        )
+
+        assert {cluster.logical_agent_id for cluster in clusters.values()} == expected_ids
+        assert set(manager.logical_agent_ids) == expected_ids
+
+
+def test_training_scenario_has_exactly_twelve_persistent_roles() -> None:
+    from train import build_training_env
+
+    env = build_training_env(seed=42)
+    manager = env.base_env.clustering_manager
+
+    assert manager is not None
+    assert manager.optimal_cluster_count(len(env.base_env.uavs)) == 12
+    assert manager.logical_agent_ids == tuple(f"ch-agent-{index}" for index in range(12))

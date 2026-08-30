@@ -457,6 +457,12 @@ def main() -> None:
         help="Optional CMADDPG checkpoint output path.",
     )
     parser.add_argument(
+        "--checkpoint-interval",
+        type=int,
+        default=100,
+        help="Save a numbered checkpoint and refresh metrics every N episodes; 0 disables it.",
+    )
+    parser.add_argument(
         "--env",
         choices=["small", "medium", "training"],
         default="training",
@@ -561,6 +567,14 @@ def main() -> None:
             use_actor_resource_awareness=args.resource_awareness,
         ),
     )
+    manager = env.base_env.clustering_manager
+    if manager is not None:
+        system.configure_agent_pool(manager.logical_agent_ids)
+    periodic_checkpoint_path = (
+        PROJECT_ROOT / args.checkpoint_output
+        if args.checkpoint_output
+        else PROJECT_ROOT / "outputs/checkpoints/cmaddpg.pt"
+    )
     trainer = CMADDPGTrainer(
         env=env,
         system=system,
@@ -569,6 +583,9 @@ def main() -> None:
             steps_per_episode=args.steps,
             batch_size=args.batch_size,
             progress_print_interval=args.progress_interval,
+            checkpoint_interval=args.checkpoint_interval,
+            checkpoint_path=periodic_checkpoint_path,
+            metrics_path=PROJECT_ROOT / args.output,
         ),
     )
     logger = trainer.train()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import torch
 
 from src.action_space import build_action_spec
@@ -105,6 +106,7 @@ def test_checkpoint_stores_actors_and_one_global_critic(tmp_path) -> None:
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
 
     assert checkpoint["architecture"] == "multi_actor_global_critic_v2"
+    assert checkpoint["actor_count"] == 2
     assert set(checkpoint["actors"]) == set(agent_ids)
     assert "global_critic" in checkpoint
     assert all("critic_state_dict" not in state for state in checkpoint["actors"].values())
@@ -119,3 +121,16 @@ def test_checkpoint_stores_actors_and_one_global_critic(tmp_path) -> None:
         system.global_critic.parameters(), restored.global_critic.parameters()
     ):
         torch.testing.assert_close(actual, expected)
+
+
+def test_fixed_actor_pool_rejects_unexpected_identity() -> None:
+    system = CMADDPGSystem()
+    system.configure_agent_pool(["ch-agent-0", "ch-agent-1"])
+    action_spec = build_action_spec(["target-0"], [[True]])
+    system.ensure_agent("ch-agent-0", OBSERVATION_INPUT_DIM, action_spec)
+    system.ensure_agent("ch-agent-1", OBSERVATION_INPUT_DIM, action_spec)
+
+    with pytest.raises(RuntimeError, match="unexpected Actor"):
+        system.ensure_agent("ch-agent-2", OBSERVATION_INPUT_DIM, action_spec)
+
+    assert system.total_actor_count == 2

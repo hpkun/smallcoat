@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 import time
 import numpy as np
+import torch
 
 from .cmaddpg import CMADDPGSystem
 from .metrics_logger import MetricsLogger
@@ -18,6 +20,9 @@ class TrainerConfig:
     update_every: int = 10
     batch_size: int = 8
     progress_print_interval: int = 10
+    checkpoint_interval: int = 0
+    checkpoint_path: str | Path | None = None
+    metrics_path: str | Path | None = None
 
 
 class CMADDPGTrainer:
@@ -33,6 +38,63 @@ class CMADDPGTrainer:
         self.system = system
         self.config = config or TrainerConfig()
         self.logger = MetricsLogger()
+
+    def _active_logical_agent_ids(self) -> set[str]:
+        manager = self.env.base_env.clustering_manager
+        if manager is None:
+            return set()
+        return set(manager.active_agent_bindings())
+
+    def _ensure_actor_pool(self, observations, action_specs) -> None:
+        """Create the fixed logical Actor pool using any current action shape."""
+
+        manager = self.env.base_env.clustering_manager
+        if manager is not None and self.system.allowed_agent_ids is None:
+            self.system.configure_agent_pool(manager.logical_agent_ids)
+        if observations and self.system.allowed_agent_ids is not None:
+            template_agent_id = next(iter(observations))
+            template_spec = action_specs[template_agent_id]
+            template_state_dim = int(observations[template_agent_id].shape[0])
+            for agent_id in sorted(self.system.allowed_agent_ids):
+                if agent_id not in self.system.actors:
+                    self.system.ensure_agent(
+                        agent_id=agent_id,
+                        state_dim=template_state_dim,
+                        action_spec=template_spec,
+                    )
+        for agent_id, observation in observations.items():
+            self.system.ensure_agent(
+                agent_id=agent_id,
+                state_dim=int(observation.shape[0]),
+                action_spec=action_specs[agent_id],
+            )
+
+    def _gpu_memory_metrics(self) -> tuple[float, float]:
+        if self.system.device.type != "cuda" or not torch.cuda.is_available():
+            return 0.0, 0.0
+        device = self.system.device
+        gib = float(1024 ** 3)
+        return (
+            float(torch.cuda.memory_allocated(device) / gib),
+            float(torch.cuda.memory_reserved(device) / gib),
+        )
+
+    def _periodic_checkpoint(self, completed_episodes: int) -> Path | None:
+        if (
+            self.config.checkpoint_interval <= 0
+            or self.config.checkpoint_path is None
+            or completed_episodes % self.config.checkpoint_interval != 0
+        ):
+            return None
+        base_path = Path(self.config.checkpoint_path)
+        checkpoint_path = base_path.with_name(
+            f"{base_path.stem}_{completed_episodes}{base_path.suffix or '.pt'}"
+        )
+        saved_path = self.system.save(checkpoint_path)
+        if self.config.metrics_path is not None:
+            self.logger.to_json(self.config.metrics_path)
+        print(f"[train] checkpoint={saved_path}", flush=True)
+        return saved_path
 
     @staticmethod
     def _format_metric(value: float | None) -> str:
@@ -60,6 +122,11 @@ class CMADDPGTrainer:
             f"{'ActorLoss':>10} "
             f"{'CriticLoss':>10} "
             f"{'Buffer':>8} "
+            f"{'Active':>7} "
+            f"{'Total':>6} "
+            f"{'MaxTasks':>8} "
+            f"{'GPUA/GiB':>9} "
+            f"{'GPUR/GiB':>9} "
             f"{'EnvTime':>8} "
             f"{'UpdTime':>8} "
             f"{'EpTime':>8} "
@@ -80,6 +147,9 @@ class CMADDPGTrainer:
         episode_update_time_s: float,
         episode_total_time_s: float,
         elapsed_s: float,
+        max_tasks: int,
+        gpu_allocated_gib: float,
+        gpu_reserved_gib: float,
     ) -> None:
         progress = 100.0 * float(episode + 1) / float(total_episodes)
         print(
@@ -91,6 +161,11 @@ class CMADDPGTrainer:
             f"{self._format_metric(last_actor_loss)} "
             f"{self._format_metric(last_critic_loss)} "
             f"{len(self.system.replay_buffer):>8} "
+            f"{self.system.active_actor_count:>7} "
+            f"{self.system.total_actor_count:>6} "
+            f"{max_tasks:>8} "
+            f"{gpu_allocated_gib:>9.3f} "
+            f"{gpu_reserved_gib:>9.3f} "
             f"{self._format_seconds(episode_env_time_s):>8} "
             f"{self._format_seconds(episode_update_time_s):>8} "
             f"{self._format_seconds(episode_total_time_s):>8} "
@@ -105,6 +180,9 @@ class CMADDPGTrainer:
         reward_config = self.env.reward_calculator.config
         training_time_slot = 0
         training_cumulative_system_profit = 0.0
+        manager = self.env.base_env.clustering_manager
+        if manager is not None:
+            self.system.configure_agent_pool(manager.logical_agent_ids)
         if self.config.progress_print_interval > 0:
             self._print_training_header()
 
@@ -113,14 +191,10 @@ class CMADDPGTrainer:
 
             # 每个 episode 开始时重置环境：清空队列、重置时间、生成第一批任务。
             observations, action_specs = self.env.reset()
+            self.system.set_active_agent_ids(self._active_logical_agent_ids())
 
             # 根据当前出现的 CH/孤立 UAV 创建或确认对应 agent。
-            for agent_id, observation in observations.items():
-                self.system.ensure_agent(
-                    agent_id=agent_id,
-                    state_dim=int(observation.shape[0]),
-                    action_spec=action_specs[agent_id],
-                )
+            self._ensure_actor_pool(observations, action_specs)
 
             # OU 探索噪声按 episode 重置，避免上一轮噪声状态影响本轮探索。
             self.system.reset_noise()
@@ -147,6 +221,7 @@ class CMADDPGTrainer:
             episode_backup_success_tasks = 0
             episode_backup_selected_tasks = 0
             episode_reliability_failure_tasks = 0
+            episode_max_tasks = 0
             battery_status = self.env.base_env.battery_status()
 
             for step in range(self.config.steps_per_episode):
@@ -167,6 +242,7 @@ class CMADDPGTrainer:
                 # 环境执行一步：处理当前 pending tasks，返回下一时刻观测和任务执行记录。
                 env_started_at = time.perf_counter()
                 next_observations, rewards, done, info = self.env.step(env_actions)
+                self.system.set_active_agent_ids(self._active_logical_agent_ids())
                 step_env_time_s = time.perf_counter() - env_started_at
                 episode_env_time_s += step_env_time_s
                 episode_shared_rewards.append(info["shared_reward"])
@@ -183,6 +259,7 @@ class CMADDPGTrainer:
                 # 当前 step 的任务执行记录，是完成率、超时率、冗余率等指标的来源。
                 records = info["records"]
                 total_tasks = len(records)
+                episode_max_tasks = max(episode_max_tasks, total_tasks)
                 replica_metrics = self.env.extract_record_metrics(records)
                 # 能耗按所有实际执行任务累计，包含冗余副本和取消前的部分能耗。
                 step_transmission_energy_j = float(
@@ -645,6 +722,7 @@ class CMADDPGTrainer:
                 else 0.0
             )
             episode_total_time_s = time.perf_counter() - episode_started_at
+            gpu_allocated_gib, gpu_reserved_gib = self._gpu_memory_metrics()
             episode_step_records = [
                 record
                 for record in self.logger.records
@@ -901,6 +979,11 @@ class CMADDPGTrainer:
                 episode_env_time_s=episode_env_time_s,
                 episode_update_time_s=episode_update_time_s,
                 episode_total_time_s=episode_total_time_s,
+                active_actor_count=self.system.active_actor_count,
+                total_actor_count=self.system.total_actor_count,
+                max_tasks=episode_max_tasks,
+                gpu_allocated_gib=gpu_allocated_gib,
+                gpu_reserved_gib=gpu_reserved_gib,
             )
 
             # 按设定间隔向终端打印训练进度，方便长实验观察是否正常推进。
@@ -924,7 +1007,12 @@ class CMADDPGTrainer:
                     episode_update_time_s=episode_update_time_s,
                     episode_total_time_s=episode_total_time_s,
                     elapsed_s=time.perf_counter() - training_started_at,
+                    max_tasks=episode_max_tasks,
+                    gpu_allocated_gib=gpu_allocated_gib,
+                    gpu_reserved_gib=gpu_reserved_gib,
                 )
+
+            self._periodic_checkpoint(episode + 1)
 
         if self.config.progress_print_interval > 0:
             print(

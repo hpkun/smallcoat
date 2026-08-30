@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from train import build_training_env
 from src.cmaddpg import CMADDPGSystem
@@ -8,7 +9,7 @@ from src.trainer import CMADDPGTrainer
 from src.trainer import TrainerConfig
 
 
-def test_next_agent_exists_before_transition_store_and_update(monkeypatch) -> None:
+def test_unexpected_next_agent_is_rejected_before_store_and_update(monkeypatch) -> None:
     env = build_training_env(arrival_rate_tasks_per_s=25.0)
     for _ in range(20):
         observations, action_specs = env.reset()
@@ -39,12 +40,9 @@ def test_next_agent_exists_before_transition_store_and_update(monkeypatch) -> No
 
     system = CMADDPGSystem()
     call_order: list[str] = []
-    original_store = system.store_transitions
 
     def checked_store(*args, **kwargs):
-        assert new_agent_id in system.actors
         call_order.append("store")
-        return original_store(*args, **kwargs)
 
     def checked_update(*args, **kwargs):
         assert new_agent_id in system.actors
@@ -65,6 +63,8 @@ def test_next_agent_exists_before_transition_store_and_update(monkeypatch) -> No
             progress_print_interval=0,
         ),
     )
-    trainer.train()
+    with pytest.raises(RuntimeError, match="unexpected Actor"):
+        trainer.train()
 
-    assert call_order == ["store", "update"]
+    assert new_agent_id not in system.actors
+    assert call_order == []

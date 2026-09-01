@@ -146,4 +146,3 @@ def write_json(path: str | Path, payload: Any) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     with output.open("w", encoding="utf-8") as stream:
         json.dump(payload, stream, ensure_ascii=False, indent=2, allow_nan=False)
-

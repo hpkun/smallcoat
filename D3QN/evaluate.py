@@ -50,6 +50,8 @@ def main() -> None:
         def policy(state, env, rng):
             mask = [candidate.available for candidate in env.candidates]
             return baseline(mask, env.candidates, env.current_task, rng)
+    if not any(item.startswith("environment.episode_steps=") for item in args.set):
+        config["environment"]["episode_steps"] = int(config["training"].get("evaluation_steps", config["environment"]["episode_steps"]))
     rows, aggregate = evaluate_callable(config, policy, args.seeds)
     payload = {"method": args.method, "checkpoint": args.checkpoint, "runs": rows, "aggregate": aggregate}
     write_json(args.output, payload)

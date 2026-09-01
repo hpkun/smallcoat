@@ -98,11 +98,7 @@ class D3QNAgent:
         masks = torch.as_tensor(batch.next_masks, dtype=torch.bool, device=self.device)
         q_values = self.online(states).gather(1, actions).squeeze(1)
         with torch.no_grad():
-            if self.double_q:
-                next_actions = masked_q_values(self.online(next_states), masks).argmax(dim=1, keepdim=True)
-                next_q = self.target(next_states).gather(1, next_actions).squeeze(1)
-            else:
-                next_q = masked_q_values(self.target(next_states), masks).max(dim=1).values
+            next_q = self._next_q_values(next_states, masks)
             targets = rewards + self.gamma * (1.0 - dones) * next_q
         loss = nn.functional.smooth_l1_loss(q_values, targets)
         self.optimizer.zero_grad(set_to_none=True)
@@ -110,6 +106,13 @@ class D3QNAgent:
         nn.utils.clip_grad_norm_(self.online.parameters(), self.gradient_clip)
         self.optimizer.step()
         return float(loss.detach().cpu())
+
+    def _next_q_values(self, next_states: torch.Tensor, masks: torch.Tensor) -> torch.Tensor:
+        """Compute masked Double-Q bootstrap values (paper Eq. 34)."""
+        if self.double_q:
+            next_actions = masked_q_values(self.online(next_states), masks).argmax(dim=1, keepdim=True)
+            return self.target(next_states).gather(1, next_actions).squeeze(1)
+        return masked_q_values(self.target(next_states), masks).max(dim=1).values
 
     def save(self, path: str | Path, metadata: dict[str, Any] | None = None) -> None:
         output = Path(path)
@@ -135,4 +138,3 @@ class D3QNAgent:
             self.optimizer.load_state_dict(payload["optimizer"])
         self.lagrange = float(payload.get("lagrange", self.lagrange))
         return dict(payload.get("metadata", {}))
-

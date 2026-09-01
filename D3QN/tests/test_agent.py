@@ -40,3 +40,22 @@ class AgentTests(unittest.TestCase):
         self.assertIsNotNone(loss)
         self.assertTrue(np.isfinite(loss))
         self.assertGreaterEqual(agent.lagrange, 0.0)
+
+    def test_double_q_target_uses_online_selection(self):
+        config = tiny_config()
+        agent = D3QNAgent(2, 2, config, seed=0)
+        class ConstantQ(torch.nn.Module):
+            def __init__(self, values):
+                super().__init__()
+                self.register_buffer("values", torch.tensor(values, dtype=torch.float32))
+
+            def forward(self, states):
+                return self.values.expand(states.shape[0], -1)
+
+        agent.online = ConstantQ([5.0, 1.0])
+        agent.target = ConstantQ([2.0, 9.0])
+        states = torch.zeros(1, 2)
+        mask = torch.ones(1, 2, dtype=torch.bool)
+        self.assertEqual(agent._next_q_values(states, mask).item(), 2.0)
+        agent.double_q = False
+        self.assertEqual(agent._next_q_values(states, mask).item(), 9.0)

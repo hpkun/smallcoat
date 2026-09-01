@@ -8,7 +8,7 @@ environment:
   arrival_rate: 12.5
   arrival_amplitude: 0.3
   arrival_period_s: 86400.0
-  episode_steps: 500
+  episode_steps: 1000
   edge_coverage_km: 1.5
   satellite_window_s: 600.0
   satellite_safety_margin_s: 30.0
@@ -18,8 +18,10 @@ environment:
   max_replicas: 3
   enable_redundancy: true
   capacity_gating: true
+  sample_reliability_failures: true
 training:
-  episodes: 300
+  episodes: 1000
+  evaluation_steps: 10000
   learning_rate: 0.0001
   lagrange_learning_rate: 0.01
   gamma: 0.99

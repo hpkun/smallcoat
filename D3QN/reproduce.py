@@ -29,10 +29,12 @@ def profile_config(config: dict, profile: str) -> tuple[dict, list[int]]:
         result["training"]["episodes"] = 1
         result["environment"]["episode_steps"] = 70
         result["training"]["batch_size"] = 16
+        result["training"]["evaluation_steps"] = 70
         return result, [0]
     if profile == "quick":
         result["training"]["episodes"] = 30
         result["environment"]["episode_steps"] = 200
+        result["training"]["evaluation_steps"] = 1000
         return result, [0, 1, 2]
     return result, list(range(10))
 
@@ -46,6 +48,8 @@ def main() -> None:
     all_results: dict[str, dict] = {}
     for method in args.methods:
         method_config = deepcopy(config)
+        evaluation_config = deepcopy(method_config)
+        evaluation_config["environment"]["episode_steps"] = int(method_config["training"]["evaluation_steps"])
         if method in POLICIES:
             baseline = POLICIES[method]
 
@@ -53,7 +57,7 @@ def main() -> None:
                 mask = [candidate.available for candidate in env.candidates]
                 return selected(mask, env.candidates, env.current_task, rng)
 
-            rows, aggregate = evaluate_callable(method_config, policy, seeds)
+            rows, aggregate = evaluate_callable(evaluation_config, policy, seeds)
         else:
             rows = []
             for seed in seeds:
@@ -65,7 +69,9 @@ def main() -> None:
                 def policy(state, env: SAGINEnv, rng, selected=agent):
                     return selected.act(state, [candidate.available for candidate in env.candidates], epsilon=0.0)
 
-                evaluation, _ = evaluate_callable(train_config, policy, [10_000 + seed])
+                evaluation_config = deepcopy(train_config)
+                evaluation_config["environment"]["episode_steps"] = int(train_config["training"]["evaluation_steps"])
+                evaluation, _ = evaluate_callable(evaluation_config, policy, [10_000 + seed])
                 rows.extend(evaluation)
             keys = [key for key in rows[0] if key != "seed"]
             import numpy as np
@@ -80,7 +86,7 @@ def main() -> None:
         print(f"{method:20s} TCR={aggregate['tcr']['mean']:.2f}% SR={aggregate['reliability_pct']['mean']:.2f}% CVR={aggregate['cvr']['mean']:.2f}%")
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "results.json", {"profile": args.profile, "seeds": seeds, "methods": all_results})
-    metrics = ("tcr", "latency_ms", "energy_mj", "reliability_pct", "resource_utilization_pct", "decision_latency_ms", "cvr", "expected_cost", "mean_replicas")
+    metrics = ("tcr", "deadline_satisfaction_pct", "latency_ms", "energy_mj", "reliability_pct", "resource_utilization_pct", "decision_latency_ms", "cvr", "expected_cost", "mean_replicas")
     with (output_dir / "summary.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(["method", *[f"{metric}_mean" for metric in metrics], *[f"{metric}_std" for metric in metrics]])

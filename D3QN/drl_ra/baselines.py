@@ -13,8 +13,10 @@ def random_policy(mask: np.ndarray, candidates: list, task: Any, rng: np.random.
 
 
 def nearest_policy(mask: np.ndarray, candidates: list, task: Any, rng: np.random.Generator) -> int:
-    feasible = [candidate for candidate in candidates if mask[candidate.action]]
-    return int(min(feasible, key=lambda item: item.delay_s).action)
+    feasible = [candidate for candidate in candidates if mask[candidate.action] and candidate.layer != "local"]
+    if not feasible:
+        feasible = [candidate for candidate in candidates if mask[candidate.action]]
+    return int(min(feasible, key=lambda item: item.distance_km).action)
 
 
 def reliable_policy(mask: np.ndarray, candidates: list, task: Any, rng: np.random.Generator) -> int:
@@ -23,7 +25,12 @@ def reliable_policy(mask: np.ndarray, candidates: list, task: Any, rng: np.rando
 
 
 def ra_opt_policy(mask: np.ndarray, candidates: list, task: Any, rng: np.random.Generator) -> int:
-    """Enumerative one-task equivalent of the paper's online RA-Opt objective."""
+    """RA-Opt-inspired single-task enumerative approximation.
+
+    The published MIP jointly allocates CPU across a batch of tasks. This
+    baseline evaluates the feasible one-task subproblem, so it is a reference
+    policy rather than a full CVXPY/ECOS_BB reproduction.
+    """
     feasible = [candidate for candidate in candidates if mask[candidate.action]]
     reliable = [candidate for candidate in feasible if candidate.reliability >= task.reliability_required]
     pool = reliable or feasible

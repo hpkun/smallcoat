@@ -43,6 +43,21 @@ class Candidate:
     relay_uav: int | None = None
 
 
+@dataclass(frozen=True)
+class NTLAction:
+    """A consistent factorized NTL action used by the hierarchical policy."""
+
+    mode: int
+    air: int = 0
+    space: int = 0
+
+
+NTL_NONE = 0
+NTL_AIR = 1
+NTL_SPACE = 2
+NTL_BOTH = 3
+
+
 def sigmoid(value: float) -> float:
     value = float(np.clip(value, -60.0, 60.0))
     return 1.0 / (1.0 + exp(-value))
@@ -73,6 +88,14 @@ class SAGINEnv:
         self.num_satellites = int(self.env_cfg["num_satellites"])
         self.action_dim = 1 + self.num_edges + self.num_uavs + self.num_satellites
         self.state_dim = 8 + 5 * self.action_dim
+        self.ground_action_dim = 2 + self.num_edges
+        self.ground_trigger_action = self.ground_action_dim - 1
+        self.ground_state_dim = 7 + 7 * (1 + self.num_edges)
+        self.air_state_dim = 9 + 9 * self.num_uavs
+        self.space_state_dim = 9 + 8 * self.num_satellites
+        self.redundancy_state_dim = 15
+        self.critic_state_dim = self.ground_state_dim + self.air_state_dim + self.space_state_dim + self.ground_action_dim + 4
+        self.ntl_state_dim = 9 + 9 * self.num_uavs + 8 * self.num_satellites
         self.max_steps = int(self.env_cfg["episode_steps"])
         self.current_task: Task | None = None
         self._last_candidates: list[Candidate] = []
@@ -94,6 +117,12 @@ class SAGINEnv:
     @property
     def available_capacity(self) -> np.ndarray:
         return np.maximum(0.0, self.total_capacity - self.used_capacity - self.reserved_capacity)
+
+    @property
+    def ground_action_mask(self) -> np.ndarray:
+        ground = [candidate.available for candidate in self._last_candidates[: 1 + self.num_edges]]
+        ntl_available = any(candidate.available for candidate in self._last_candidates[1 + self.num_edges :])
+        return np.asarray([*ground, ntl_available], dtype=bool)
 
     def reset(self, seed: int | None = None) -> tuple[np.ndarray, dict[str, Any]]:
         if seed is not None:
@@ -270,15 +299,221 @@ class SAGINEnv:
         position = self.device_positions[task.device]
         return [self._local_candidate(task), *[self._edge_candidate(task, position, i) for i in range(self.num_edges)], *[self._uav_candidate(task, position, i) for i in range(self.num_uavs)], *[self._sat_candidate(task, position, i) for i in range(self.num_satellites)]]
 
+    def _state_from_candidates(self, task: Task, candidates: list[Candidate]) -> np.ndarray:
+        pos = self.device_positions[task.device] / float(self.env_cfg["area_km"])
+        header = np.asarray([np.log1p(task.data_bits) / 18.0, np.log1p(task.cycles) / 24.0, min(task.deadline_s / 120.0, 1.0), task.reliability_required, pos[0], pos[1], self.step_count / max(self.max_steps, 1), self.uav_battery.mean()], dtype=np.float32)
+        features = np.asarray([value for candidate in candidates for value in (min(candidate.delay_s / max(task.deadline_s, 1e-6), 3.0) / 3.0, candidate.reliability, candidate.node_availability, min(candidate.queue_s / max(task.deadline_s, 1e-6), 1.0), float(candidate.available))], dtype=np.float32)
+        return np.concatenate((header, features))
+
     def _observation(self) -> tuple[np.ndarray, np.ndarray]:
         assert self.current_task is not None
         task = self.current_task
         candidates = self._candidate_evaluations(task)
         self._last_candidates = candidates
+        return self._state_from_candidates(task, candidates), np.asarray([candidate.available for candidate in candidates], dtype=bool)
+
+    def _capacity_ratio(self, candidate: Candidate) -> float:
+        assert self.current_task is not None
+        if candidate.action == 0:
+            available = self.local_capacity[self.current_task.device]
+        else:
+            available = self.available_capacity[candidate.action]
+        return float(min(available / max(candidate.required_capacity, 1e-9), 2.0) / 2.0)
+
+    def _hierarchical_header(self, primary: Candidate | None) -> np.ndarray:
+        assert self.current_task is not None
+        task = self.current_task
+        primary_reliability = 0.0 if primary is None else primary.reliability
+        primary_delay = 3.0 if primary is None else min(primary.delay_s / max(task.deadline_s, 1e-6), 3.0)
+        return np.asarray(
+            [
+                np.log1p(task.data_bits) / 18.0,
+                np.log1p(task.cycles) / 24.0,
+                min(task.deadline_s / 120.0, 1.0),
+                task.reliability_required,
+                primary_reliability,
+                max(0.0, task.reliability_required - primary_reliability),
+                primary_delay / 3.0,
+                float(primary is None),
+                0.0 if primary is None else (primary.action + 1) / max(self.ground_action_dim, 1),
+            ],
+            dtype=np.float32,
+        )
+
+    def ground_observation(self) -> np.ndarray:
+        """Return the local/BS-only observation consumed by Ground D3QN."""
+        assert self.current_task is not None
+        task = self.current_task
         pos = self.device_positions[task.device] / float(self.env_cfg["area_km"])
-        header = np.asarray([np.log1p(task.data_bits) / 18.0, np.log1p(task.cycles) / 24.0, min(task.deadline_s / 120.0, 1.0), task.reliability_required, pos[0], pos[1], self.step_count / max(self.max_steps, 1), self.uav_battery.mean()], dtype=np.float32)
-        features = np.asarray([value for candidate in candidates for value in (min(candidate.delay_s / max(task.deadline_s, 1e-6), 3.0) / 3.0, candidate.reliability, candidate.node_availability, min(candidate.queue_s / max(task.deadline_s, 1e-6), 1.0), float(candidate.available))], dtype=np.float32)
-        return np.concatenate((header, features)), np.asarray([candidate.available for candidate in candidates], dtype=bool)
+        header = np.asarray(
+            [
+                np.log1p(task.data_bits) / 18.0,
+                np.log1p(task.cycles) / 24.0,
+                min(task.deadline_s / 120.0, 1.0),
+                task.reliability_required,
+                pos[0],
+                pos[1],
+                self.step_count / max(self.max_steps, 1),
+            ],
+            dtype=np.float32,
+        )
+        features: list[float] = []
+        for candidate in self._last_candidates[: 1 + self.num_edges]:
+            features.extend(
+                (
+                    min(candidate.delay_s / max(task.deadline_s, 1e-6), 3.0) / 3.0,
+                    candidate.reliability,
+                    candidate.link_reliability,
+                    candidate.node_availability,
+                    min(candidate.queue_s / max(task.deadline_s, 1e-6), 1.0),
+                    self._capacity_ratio(candidate),
+                    float(candidate.available),
+                )
+            )
+        return np.concatenate((header, np.asarray(features, dtype=np.float32)))
+
+    def _air_observation(self, primary: Candidate | None) -> np.ndarray:
+        assert self.current_task is not None
+        task = self.current_task
+        features: list[float] = []
+        start = 1 + self.num_edges
+        for index, candidate in enumerate(self._last_candidates[start : start + self.num_uavs]):
+            features.extend(
+                (
+                    min(candidate.delay_s / max(task.deadline_s, 1e-6), 3.0) / 3.0,
+                    candidate.reliability,
+                    candidate.link_reliability,
+                    candidate.node_availability,
+                    min(candidate.queue_s / max(task.deadline_s, 1e-6), 1.0),
+                    self._capacity_ratio(candidate),
+                    self.uav_battery[index],
+                    min(candidate.distance_km / 5.0, 1.0),
+                    float(candidate.available),
+                )
+            )
+        return np.concatenate((self._hierarchical_header(primary), np.asarray(features, dtype=np.float32)))
+
+    def _space_observation(self, primary: Candidate | None) -> np.ndarray:
+        assert self.current_task is not None
+        task = self.current_task
+        features: list[float] = []
+        start = 1 + self.num_edges + self.num_uavs
+        for index, candidate in enumerate(self._last_candidates[start:]):
+            visible, remaining = self._satellite_state(index)
+            features.extend(
+                (
+                    min(candidate.delay_s / max(task.deadline_s, 1e-6), 3.0) / 3.0,
+                    candidate.reliability,
+                    candidate.link_reliability,
+                    candidate.node_availability,
+                    min(candidate.queue_s / max(task.deadline_s, 1e-6), 1.0),
+                    self._capacity_ratio(candidate),
+                    float(visible and candidate.available),
+                    min(remaining / max(float(self.env_cfg["satellite_window_s"]), 1e-6), 1.0),
+                )
+            )
+        return np.concatenate((self._hierarchical_header(primary), np.asarray(features, dtype=np.float32)))
+
+    def _redundancy_observation(self, primary: Candidate | None) -> np.ndarray:
+        header = self._hierarchical_header(primary)
+        air_start = 1 + self.num_edges
+        air = [item for item in self._last_candidates[air_start : air_start + self.num_uavs] if item.available]
+        space = [item for item in self._last_candidates[air_start + self.num_uavs :] if item.available]
+        aggregate = np.asarray(
+            [
+                len(air) / max(self.num_uavs, 1),
+                len(space) / max(self.num_satellites, 1),
+                max((item.reliability for item in air), default=0.0),
+                max((item.reliability for item in space), default=0.0),
+                min(min((item.delay_s for item in air), default=0.0) / 120.0, 1.0),
+                min(min((item.delay_s for item in space), default=0.0) / 120.0, 1.0),
+            ],
+            dtype=np.float32,
+        )
+        return np.concatenate((header, aggregate))
+
+    def _ntl_observation(self, primary: Candidate | None) -> np.ndarray:
+        """Unified observation for the single NTL PPO coordinator."""
+        air = self._air_observation(primary)
+        space = self._space_observation(primary)
+        return np.concatenate((air, space[9:]))
+
+    def prepare_hierarchical(self, ground_action: int) -> dict[str, Any]:
+        """Resolve the gate and construct all CTDE observations without advancing time."""
+        if not 0 <= int(ground_action) < self.ground_action_dim:
+            raise ValueError(f"ground action {ground_action} outside [0, {self.ground_action_dim})")
+        assert self.current_task is not None
+        explicit_trigger = int(ground_action) == self.ground_trigger_action
+        ground_mask = self.ground_action_mask
+        invalid_ground = not bool(ground_mask[int(ground_action)])
+        primary = None if explicit_trigger or invalid_ground else self._last_candidates[int(ground_action)]
+        gate = bool(
+            explicit_trigger
+            or invalid_ground
+            or primary is None
+            or not primary.available
+            or primary.delay_s > self.current_task.deadline_s
+            or primary.reliability < self.current_task.reliability_required
+        )
+        air_start = 1 + self.num_edges
+        air_candidates = self._last_candidates[air_start : air_start + self.num_uavs]
+        space_candidates = self._last_candidates[air_start + self.num_uavs :]
+        air_base = np.asarray([True, *[item.available for item in air_candidates]], dtype=bool)
+        space_base = np.asarray([True, *[item.available for item in space_candidates]], dtype=bool)
+        mode_mask = np.asarray(
+            [
+                primary is not None,
+                bool(air_base[1:].any()),
+                bool(space_base[1:].any()),
+                bool(air_base[1:].any() and space_base[1:].any()),
+            ],
+            dtype=bool,
+        )
+        air_observation = self._air_observation(primary)
+        space_observation = self._space_observation(primary)
+        ntl_observation = np.concatenate((air_observation, space_observation[9:]))
+        ground_one_hot = np.zeros(self.ground_action_dim, dtype=np.float32)
+        ground_one_hot[int(ground_action)] = 1.0
+        primary_rel = 0.0 if primary is None else primary.reliability
+        primary_delay = 3.0 if primary is None else min(primary.delay_s / max(self.current_task.deadline_s, 1e-6), 3.0) / 3.0
+        critic_tail = np.asarray(
+            [primary_rel, primary_delay, max(0.0, self.current_task.reliability_required - primary_rel), float(gate)],
+            dtype=np.float32,
+        )
+        return {
+            "ground_action": int(ground_action),
+            "primary": primary,
+            "gate": gate,
+            "invalid_ground": invalid_ground,
+            "air_observation": air_observation,
+            "space_observation": space_observation,
+            "redundancy_observation": self._redundancy_observation(primary),
+            "ntl_observation": ntl_observation,
+            "critic_state": np.concatenate(
+                (self.ground_observation(), air_observation, space_observation, ground_one_hot, critic_tail)
+            ),
+            "air_mask": air_base,
+            "space_mask": space_base,
+            "mode_mask": mode_mask,
+        }
+
+    def heuristic_ntl_action(self, context: dict[str, Any]) -> NTLAction:
+        """Stable warm-up policy; final hierarchical evaluation never uses it."""
+        if not context["gate"]:
+            return NTLAction(NTL_NONE)
+        air_choices = np.flatnonzero(context["air_mask"])[1:]
+        space_choices = np.flatnonzero(context["space_mask"])[1:]
+        air_start = 1 + self.num_edges
+        best_air = max(air_choices, key=lambda value: self._last_candidates[air_start + int(value) - 1].reliability, default=0)
+        space_start = air_start + self.num_uavs
+        best_space = max(space_choices, key=lambda value: self._last_candidates[space_start + int(value) - 1].reliability, default=0)
+        if best_air and best_space:
+            return NTLAction(NTL_BOTH, int(best_air), int(best_space))
+        if best_air:
+            return NTLAction(NTL_AIR, int(best_air), 0)
+        if best_space:
+            return NTLAction(NTL_SPACE, 0, int(best_space))
+        return NTLAction(NTL_NONE)
 
     def _replica_plan(self, primary: Candidate) -> list[Candidate]:
         assert self.current_task is not None
@@ -392,8 +627,148 @@ class SAGINEnv:
         next_state, next_mask = self._observation()
         return next_state, float(reward), terminated, False, {**record, "action_mask": next_mask, "raw_action": int(action)}
 
+    def step_hierarchical(
+        self,
+        ground_action: int,
+        ntl_action: NTLAction | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        """Execute a Ground D3QN decision and an optional learned NTL plan.
+
+        This is deliberately separate from :meth:`step`; the legacy DRL-RA
+        action and analytic replica path therefore retain their behavior.
+        """
+        assert self.current_task is not None
+        task = self.current_task
+        context = self.prepare_hierarchical(ground_action) if context is None else context
+        if int(context["ground_action"]) != int(ground_action):
+            raise ValueError("hierarchical context does not match the ground action")
+        gate = bool(context["gate"])
+        primary: Candidate | None = context["primary"]
+        action = ntl_action if gate and ntl_action is not None else NTLAction(NTL_NONE)
+        invalid_joint = bool(context["invalid_ground"])
+
+        if not 0 <= int(action.mode) <= NTL_BOTH:
+            invalid_joint = True
+            action = NTLAction(NTL_NONE)
+        expected_air = action.mode in (NTL_AIR, NTL_BOTH)
+        expected_space = action.mode in (NTL_SPACE, NTL_BOTH)
+        if bool(action.air) != expected_air or bool(action.space) != expected_space:
+            invalid_joint = True
+        if not bool(context["mode_mask"][int(action.mode)]):
+            invalid_joint = True
+        if not 0 <= int(action.air) < len(context["air_mask"]) or not bool(context["air_mask"][int(action.air)]):
+            invalid_joint = True
+        if not 0 <= int(action.space) < len(context["space_mask"]) or not bool(context["space_mask"][int(action.space)]):
+            invalid_joint = True
+
+        if invalid_joint:
+            action = self.heuristic_ntl_action(context) if gate else NTLAction(NTL_NONE)
+
+        replicas: list[Candidate] = [] if primary is None else [primary]
+        air_start = 1 + self.num_edges
+        space_start = air_start + self.num_uavs
+        if action.mode in (NTL_AIR, NTL_BOTH):
+            replicas.append(self._last_candidates[air_start + int(action.air) - 1])
+        if action.mode in (NTL_SPACE, NTL_BOTH):
+            replicas.append(self._last_candidates[space_start + int(action.space) - 1])
+        if not replicas:
+            invalid_joint = True
+            replicas = [self._last_candidates[0]]
+
+        selected = primary if primary is not None else replicas[0]
+        self._reserve(replicas)
+        combined_reliability = 1.0 - float(np.prod([1.0 - item.reliability for item in replicas]))
+        successful_replicas = [item for item in replicas if self.rng.random() < item.reliability]
+        winner = min(successful_replicas, key=lambda item: item.delay_s) if successful_replicas else None
+        latency = winner.delay_s if winner is not None else max(item.delay_s for item in replicas)
+        energy = sum(item.energy_mj for item in replicas)
+        deadline_met = latency <= task.deadline_s
+        reliability_success = winner is not None
+        completed = deadline_met and (reliability_success if bool(self.env_cfg.get("sample_reliability_failures", True)) else True)
+        cost = smooth_shortfall(task.reliability_required - combined_reliability, float(self.env_cfg["cost_temperature"]))
+        latency_normalized = min(latency / max(task.deadline_s, 1e-6), 3.0)
+        energy_normalized = min(energy / 2000.0, 3.0)
+        smooth_met = sigmoid((combined_reliability - task.reliability_required) / float(self.env_cfg["tau_smooth"]))
+        performance = -float(self.reward_cfg["latency"]) * latency_normalized - float(self.reward_cfg["energy"]) * energy_normalized
+        num_extra = max(0, len(replicas) - 1)
+        reward = (
+            performance
+            + float(self.reward_cfg["reliability"]) * combined_reliability * smooth_met
+            - float(self.reward_cfg["violation"]) * cost
+            - float(self.reward_cfg.get("replica", 0.0)) * num_extra
+            - float(self.reward_cfg.get("ntl_invocation", 0.0)) * int(gate)
+            - float(self.reward_cfg.get("invalid_joint", 1.0)) * int(invalid_joint)
+        )
+
+        self._cancel_losers(replicas, winner)
+        if winner is not None:
+            self._promote_winner(winner, self.current_time_s + winner.delay_s)
+        else:
+            self._release(replicas)
+        execution_target = winner if winner is not None else selected
+        if execution_target.action == 0:
+            self.local_queue_s[task.device] += self._service_time(execution_target, task)
+        else:
+            self.node_queues[execution_target.action] += self._service_time(execution_target, task)
+            if execution_target.layer == "uav":
+                uav_index = execution_target.action - air_start
+                self.uav_battery[uav_index] = max(0.0, self.uav_battery[uav_index] - 2e-5 * len(replicas))
+                self.relay_arrival_rate[uav_index] += 1.0 / max(self.time_step_s, 1e-6)
+            elif execution_target.layer == "satellite" and execution_target.relay_uav is not None:
+                self.relay_arrival_rate[execution_target.relay_uav] += 1.0 / max(self.time_step_s, 1e-6)
+
+        self._advance_clock()
+        record: dict[str, float | str | int] = {
+            "latency_s": latency,
+            "energy_mj": energy,
+            "reliability": combined_reliability,
+            "required_reliability": task.reliability_required,
+            "cost": cost,
+            "completed": int(completed),
+            "deadline_met": int(deadline_met),
+            "reliability_success": int(reliability_success),
+            "violation": int(combined_reliability < task.reliability_required),
+            "replicas": len(replicas),
+            "layer": selected.layer,
+            "device": task.device,
+            "task_kind": task.kind,
+            "edge_utilization": float(np.mean(self.node_queues[1 : 1 + self.num_edges] > 0.0)),
+            "invalid": int(invalid_joint),
+            "reserved_after_event": float(self.reserved_capacity.sum()),
+            "used_after_event": float(self.used_capacity.sum()),
+            "gate": int(gate),
+            "explicit_trigger": int(int(ground_action) == self.ground_trigger_action),
+            "ntl_mode": int(action.mode),
+            "num_extra_replicas": num_extra,
+            "air_selected": int(action.mode in (NTL_AIR, NTL_BOTH)),
+            "space_selected": int(action.mode in (NTL_SPACE, NTL_BOTH)),
+        }
+        self._metrics.append(record)
+        self.step_count += 1
+        terminated = self.step_count >= self.max_steps
+        self.current_task = self._sample_task()
+        next_state, next_mask = self._observation()
+        info = {
+            **record,
+            "action_mask": next_mask,
+            "ground_action_mask": self.ground_action_mask,
+            "ground_action": int(ground_action),
+        }
+        return self.ground_observation(), float(reward), terminated, False, info
+
     def summary(self) -> dict[str, float]:
         if not self._metrics:
             return {}
         numeric = lambda key: np.asarray([float(row[key]) for row in self._metrics], dtype=np.float64)
-        return {"tasks": float(len(self._metrics)), "tcr": float(100.0 * numeric("completed").mean()), "deadline_satisfaction_pct": float(100.0 * numeric("deadline_met").mean()), "latency_ms": float(1000.0 * numeric("latency_s").mean()), "energy_mj": float(numeric("energy_mj").mean()), "reliability_pct": float(100.0 * numeric("reliability").mean()), "resource_utilization_pct": float(100.0 * numeric("edge_utilization").mean()), "cvr": float(100.0 * numeric("violation").mean()), "expected_cost": float(numeric("cost").mean()), "mean_replicas": float(numeric("replicas").mean()), "mean_reserved_after_event": float(numeric("reserved_after_event").mean())}
+        result = {"tasks": float(len(self._metrics)), "tcr": float(100.0 * numeric("completed").mean()), "deadline_satisfaction_pct": float(100.0 * numeric("deadline_met").mean()), "latency_ms": float(1000.0 * numeric("latency_s").mean()), "energy_mj": float(numeric("energy_mj").mean()), "reliability_pct": float(100.0 * numeric("reliability").mean()), "resource_utilization_pct": float(100.0 * numeric("edge_utilization").mean()), "cvr": float(100.0 * numeric("violation").mean()), "expected_cost": float(numeric("cost").mean()), "mean_replicas": float(numeric("replicas").mean()), "mean_reserved_after_event": float(numeric("reserved_after_event").mean())}
+        if "gate" in self._metrics[0]:
+            result.update(
+                gate_rate_pct=float(100.0 * numeric("gate").mean()),
+                explicit_trigger_rate_pct=float(100.0 * numeric("explicit_trigger").mean()),
+                mean_extra_replicas=float(numeric("num_extra_replicas").mean()),
+                air_selection_rate_pct=float(100.0 * numeric("air_selected").mean()),
+                space_selection_rate_pct=float(100.0 * numeric("space_selected").mean()),
+                invalid_joint_rate_pct=float(100.0 * numeric("invalid").mean()),
+            )
+        return result

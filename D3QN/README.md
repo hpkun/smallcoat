@@ -2,6 +2,8 @@
 
 本仓库复现论文 *Reliable Low-Latency Task Offloading and Resource Allocation Method for Space-Air-Ground Integrated Networks*（Bu 等，2026）的核心方法。实现范围包括 SAGIN 三层仿真环境、Dueling Double DQN、可靠性感知平滑 CMDP 代价、滑动窗口拉格朗日更新、容量门控的跨层冗余，以及论文采用的主要指标与消融入口。
 
+仓库同时提供不改变原 DRL-RA 路径的 `d3qn-ppo` 扩展：Ground D3QN 负责 `local / BS / trigger-NTL`，可靠性、时延和容量 gate 按需调用单个离散 PPO。该 PPO 使用一个共享编码器和 UAV、LEO、冗余模式三个 categorical head。
+
 ## 已复现内容
 
 - 论文配置的 10 km × 10 km 场景：100 个设备、10 个边缘服务器、6 架 UAV、3 颗 LEO 卫星。
@@ -27,6 +29,25 @@ python reproduce.py --profile smoke
 python train.py --method drl-ra --seed 0
 python evaluate.py --method checkpoint --checkpoint outputs/drl-ra_seed0/model.pt --seeds 0 1 2 3 4 5 6 7 8 9
 ```
+
+训练和评估分层 D3QN-PPO：
+
+```powershell
+python train.py --method d3qn-ppo --seed 0
+python evaluate.py --method checkpoint --checkpoint outputs/d3qn-ppo_seed0/model.pt --seeds 0 1 2 3 4 5 6 7 8 9
+```
+
+训练结果同时生成 `ground_d3qn.pt` 和 `ntl_ppo.pt`，可分别部署到地面层与非地面协调器。每个系统 episode 中先执行 Ground D3QN，经 gate 按需调用 PPO，环境产生的统一系统奖励用于更新 D3QN；只有 gate 触发的 NTL 决策进入 PPO rollout。冗余部署头的四个离散动作是 `NONE / AIR / SPACE / AIR+SPACE`。
+
+也可以直接加载两个部署文件进行联合评估：
+
+```powershell
+python evaluate.py --method checkpoint `
+  --ground-checkpoint outputs/d3qn-ppo_seed0/ground_d3qn.pt `
+  --ppo-checkpoint outputs/d3qn-ppo_seed0/ntl_ppo.pt
+```
+
+整个分层系统的训练轮数由 `training.episodes` 统一控制。例如设为 `1000` 时，D3QN 与 PPO 在同一批 `1000` 个系统 episode 中联合训练。
 
 一键跑对照实验：
 
@@ -81,6 +102,8 @@ python train.py --set training.episodes=10 --set environment.episode_steps=200
 - `drl_ra/environment.py`：SAGIN 环境、可靠性、冗余、指标。
 - `drl_ra/models.py`：Dueling Q 网络与动作掩码。
 - `drl_ra/agent.py`：Double Q、回放、目标网络与拉格朗日更新。
+- `drl_ra/ppo.py`：单个共享编码器的多离散 PPO、GAE 和 PPO 更新。
+- `drl_ra/hierarchical.py`：Ground D3QN 与 NTL PPO 组合控制器及独立部署检查点。
 - `train.py` / `evaluate.py`：单模型训练和评估。
 - `reproduce.py`：多方法、多种子实验。
 - `configs/paper.yaml`：论文超参数和环境配置。

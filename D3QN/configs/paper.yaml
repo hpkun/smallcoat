@@ -37,8 +37,27 @@ training:
   hidden_sizes: [256, 128, 64]
   lambda_initial: 1.0
   gradient_clip: 10.0
+ground_training:
+  learning_rate: 0.0001
+  hidden_sizes: [256, 128, 64]
+ppo_training:
+  learning_rate: 0.0003
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_ratio: 0.2
+  entropy_coefficient: 0.01
+  value_coefficient: 0.5
+  update_epochs: 10
+  minibatch_size: 256
+  gradient_clip: 0.5
+  hidden_sizes: [256, 128]
+hierarchy:
+  ground_constrained: false
 reward:
   latency: 0.3
   energy: 0.2
   reliability: 0.3
   violation: 0.2
+  replica: 0.05
+  ntl_invocation: 0.02
+  invalid_joint: 1.0

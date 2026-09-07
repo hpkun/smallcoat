@@ -10,7 +10,7 @@ import numpy as np
 import torch
 
 from drl_ra.environment import SAGINEnv
-from drl_ra.experiment import build_agent, evaluate_callable, write_json
+from drl_ra.experiment import build_agent, build_hierarchical_agent, evaluate_callable, evaluate_hierarchical_agent, write_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,7 +31,10 @@ def load_policy(checkpoint: Path, device: str):
     method = str(metadata.get("method", checkpoint.stem.split("_seed")[0]))
     seed = int(metadata.get("seed", 0))
     probe = SAGINEnv(config, seed=seed)
-    agent = build_agent(method, probe, config, seed, device)
+    if method == "d3qn-ppo":
+        agent = build_hierarchical_agent(probe, config, seed, device)
+    else:
+        agent = build_agent(method, probe, config, seed, device)
     agent.load(checkpoint)
     return agent, config, method, seed
 
@@ -65,10 +68,13 @@ def evaluate(args: argparse.Namespace) -> dict:
                     else config["training"].get("evaluation_steps", 10_000)
                 )
 
-                def policy(state, env, rng, selected=agent):
-                    return selected.act(state, [candidate.available for candidate in env.candidates], epsilon=0.0)
+                if checkpoint_method == "d3qn-ppo":
+                    rows, _ = evaluate_hierarchical_agent(config, agent, [10_000 + seed])
+                else:
+                    def policy(state, env, rng, selected=agent):
+                        return selected.act(state, [candidate.available for candidate in env.candidates], epsilon=0.0)
 
-                rows, _ = evaluate_callable(config, policy, [10_000 + seed])
+                    rows, _ = evaluate_callable(config, policy, [10_000 + seed])
                 tcr_values.append(rows[0]["tcr"])
                 cvr_values.append(rows[0]["cvr"])
                 cost_values.append(rows[0]["expected_cost"])
@@ -90,6 +96,7 @@ def plot(payload: dict, output: Path) -> None:
     styles = {
         "d3qn": {"color": "#F28E52", "marker": "^", "linestyle": "-."},
         "drl-ra": {"color": "#E84A5F", "marker": "o", "linestyle": "-"},
+        "d3qn-ppo": {"color": "#2A9D8F", "marker": "s", "linestyle": "--"},
     }
     figure, axes = plt.subplots(1, 2, figsize=(12, 5), constrained_layout=True)
     figure.suptitle("Performance Under Varied Reliability Requirements", fontsize=14, fontweight="bold")

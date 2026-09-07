@@ -43,3 +43,34 @@ def masked_q_values(q_values: torch.Tensor, action_mask: torch.Tensor) -> torch.
     """Exclude unavailable UAV/satellite actions from selection."""
     return q_values.masked_fill(~action_mask.bool(), torch.finfo(q_values.dtype).min)
 
+
+class MultiHeadPPOPolicy(nn.Module):
+    """One NTL actor-critic with three categorical action heads."""
+
+    def __init__(
+        self,
+        observation_dim: int,
+        air_action_dim: int,
+        space_action_dim: int,
+        hidden_sizes: list[int] | tuple[int, ...] = (256, 128),
+    ) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        previous = observation_dim
+        for width in hidden_sizes:
+            layers.extend((nn.Linear(previous, width), nn.Tanh()))
+            previous = width
+        self.encoder = nn.Sequential(*layers)
+        self.mode_head = nn.Linear(previous, 4)
+        self.air_head = nn.Linear(previous, air_action_dim)
+        self.space_head = nn.Linear(previous, space_action_dim)
+        self.value_head = nn.Linear(previous, 1)
+
+    def forward(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        features = self.encoder(observation)
+        return (
+            self.mode_head(features),
+            self.air_head(features),
+            self.space_head(features),
+            self.value_head(features).squeeze(-1),
+        )

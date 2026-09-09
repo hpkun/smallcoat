@@ -23,6 +23,10 @@ def seed_everything(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def reliability_constrained_reward(base_reward: float, cost: float, lagrange: float) -> float:
+    return float(base_reward - lagrange * cost)
+
+
 def method_options(method: str) -> dict[str, bool]:
     options = {
         "dueling": True,
@@ -185,6 +189,11 @@ def train_hierarchical_agent(
             )
             done = terminated or truncated
             next_ground_mask = info["ground_action_mask"]
+            ppo_reward = reliability_constrained_reward(
+                reward,
+                float(info["cost"]),
+                agent.ground.lagrange,
+            )
             loss = agent.ground.observe(
                 ground_state,
                 ground_action,
@@ -198,7 +207,7 @@ def train_hierarchical_agent(
                 ground_losses.append(loss)
             if pending_ppo is not None:
                 steps = int(pending_ppo["steps"])
-                pending_ppo["reward"] += (agent.ppo.gamma**steps) * reward
+                pending_ppo["reward"] += (agent.ppo.gamma**steps) * ppo_reward
                 pending_ppo["steps"] = steps + 1
             if done and pending_ppo is not None:
                 rollout.append(

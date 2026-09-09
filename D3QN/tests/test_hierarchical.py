@@ -7,7 +7,7 @@ import torch
 
 from drl_ra.config import load_config
 from drl_ra.environment import NTLAction, NTL_AIR, NTL_BOTH, NTL_NONE, NTL_SPACE, SAGINEnv, Task
-from drl_ra.experiment import train_hierarchical_agent
+from drl_ra.experiment import reliability_constrained_reward, train_hierarchical_agent
 from drl_ra.hierarchical import HierarchicalAgent
 
 
@@ -99,6 +99,15 @@ class HierarchicalTests(unittest.TestCase):
         self.assertTrue(agent.ground.constrained)
         self.assertEqual(config["reward"]["replica"], 0.0)
         self.assertEqual(config["reward"]["ntl_invocation"], 0.0)
+
+    def test_ppo_uses_ground_lagrange_reliability_penalty(self):
+        reward = 0.8
+        cost = 0.25
+        ground_lagrange = 1.2
+
+        ppo_reward = reliability_constrained_reward(reward, cost, ground_lagrange)
+
+        self.assertAlmostEqual(ppo_reward, 0.5)
 
     def test_deployment_decision_does_not_run_critic(self):
         config = tiny_config()

@@ -2,7 +2,7 @@
 
 本仓库复现论文 *Reliable Low-Latency Task Offloading and Resource Allocation Method for Space-Air-Ground Integrated Networks*（Bu 等，2026）的核心方法。实现范围包括 SAGIN 三层仿真环境、Dueling Double DQN、可靠性感知平滑 CMDP 代价、滑动窗口拉格朗日更新、容量门控的跨层冗余，以及论文采用的主要指标与消融入口。
 
-仓库同时提供不改变原 DRL-RA 路径的 `d3qn-ppo` 扩展：Ground D3QN 负责 `local / BS / trigger-NTL`，可靠性、时延和容量 gate 按需调用单个离散 PPO。该 PPO 使用一个共享编码器和 UAV、LEO、冗余模式三个 categorical head。
+仓库同时提供不改变原 DRL-RA 路径的 `d3qn-ppo` 扩展：Ground D3QN 负责 `local / BS / trigger-NTL`，可靠性、时延和容量 gate 按需调用单个离散 PPO。该 PPO actor 使用一个共享编码器和 UAV、LEO、冗余模式三个 categorical head；训练期 critic 使用完整 `critic_state`，不进入部署文件。
 
 ## 已复现内容
 
@@ -37,7 +37,7 @@ python train.py --method d3qn-ppo --seed 0
 python evaluate.py --method checkpoint --checkpoint outputs/d3qn-ppo_seed0/model.pt --seeds 0 1 2 3 4 5 6 7 8 9
 ```
 
-训练结果同时生成 `ground_d3qn.pt` 和 `ntl_ppo.pt`，可分别部署到地面层与非地面协调器。每个系统 episode 中先执行 Ground D3QN，经 gate 按需调用 PPO，环境产生的统一系统奖励用于更新 D3QN；只有 gate 触发的 NTL 决策进入 PPO rollout。冗余部署头的四个离散动作是 `NONE / AIR / SPACE / AIR+SPACE`。
+训练结果同时生成 `ground_d3qn.pt` 和 `ntl_ppo.pt`，可分别部署到地面层与非地面协调器。每个系统 episode 中先执行带可靠性约束的 Ground D3QN，经 gate 按需调用 PPO，环境产生的统一系统奖励用于更新 D3QN；只有 gate 触发的 NTL 决策进入 PPO rollout。高可靠性任务也会进入 gate，但 primary 存在时 PPO 可以选择 `NONE`。冗余部署头的四个离散动作是 `NONE / AIR / SPACE / AIR+SPACE`。
 
 也可以直接加载两个部署文件进行联合评估：
 

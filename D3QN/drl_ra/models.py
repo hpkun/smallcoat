@@ -44,8 +44,8 @@ def masked_q_values(q_values: torch.Tensor, action_mask: torch.Tensor) -> torch.
     return q_values.masked_fill(~action_mask.bool(), torch.finfo(q_values.dtype).min)
 
 
-class MultiHeadPPOPolicy(nn.Module):
-    """One NTL actor-critic with three categorical action heads."""
+class MultiHeadPPOActor(nn.Module):
+    """NTL actor with a shared encoder and three categorical action heads."""
 
     def __init__(
         self,
@@ -64,13 +64,32 @@ class MultiHeadPPOPolicy(nn.Module):
         self.mode_head = nn.Linear(previous, 4)
         self.air_head = nn.Linear(previous, air_action_dim)
         self.space_head = nn.Linear(previous, space_action_dim)
-        self.value_head = nn.Linear(previous, 1)
 
-    def forward(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, observation: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         features = self.encoder(observation)
         return (
             self.mode_head(features),
             self.air_head(features),
             self.space_head(features),
-            self.value_head(features).squeeze(-1),
         )
+
+
+class CentralValueNetwork(nn.Module):
+    """Training-only value network over the full hierarchical state."""
+
+    def __init__(
+        self,
+        state_dim: int,
+        hidden_sizes: list[int] | tuple[int, ...] = (256, 128),
+    ) -> None:
+        super().__init__()
+        layers: list[nn.Module] = []
+        previous = state_dim
+        for width in hidden_sizes:
+            layers.extend((nn.Linear(previous, width), nn.Tanh()))
+            previous = width
+        layers.append(nn.Linear(previous, 1))
+        self.network = nn.Sequential(*layers)
+
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        return self.network(state).squeeze(-1)

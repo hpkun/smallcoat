@@ -454,6 +454,7 @@ class SAGINEnv:
             or not primary.available
             or primary.delay_s > self.current_task.deadline_s
             or primary.reliability < self.current_task.reliability_required
+            or self.current_task.reliability_required > float(self.env_cfg["replica_threshold"])
         )
         air_start = 1 + self.num_edges
         air_candidates = self._last_candidates[air_start : air_start + self.num_uavs]

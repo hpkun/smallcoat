@@ -51,13 +51,14 @@ ppo_training:
   minibatch_size: 256
   gradient_clip: 0.5
   hidden_sizes: [256, 128]
+  critic_hidden_sizes: [256, 128]
 hierarchy:
-  ground_constrained: false
+  ground_constrained: true
 reward:
   latency: 0.3
   energy: 0.2
   reliability: 0.3
   violation: 0.2
-  replica: 0.05
-  ntl_invocation: 0.02
+  replica: 0.0
+  ntl_invocation: 0.0
   invalid_joint: 1.0

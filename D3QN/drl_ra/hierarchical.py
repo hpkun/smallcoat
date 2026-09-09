@@ -46,6 +46,7 @@ class HierarchicalAgent:
             context,
             deterministic=deterministic_ntl,
             active=bool(context["gate"]),
+            include_value=False,
         )
         return ground_action, action, context, log_probability, value, masks
 
@@ -99,7 +100,7 @@ class HierarchicalAgent:
         )
         torch.save(
             {
-                "policy": self.ppo.policy.state_dict(),
+                "actor": self.ppo.actor.state_dict(),
                 "state_dim": self.ppo.observation_dim,
                 "metadata": {**common_metadata, "component": "ntl-ppo"},
             },

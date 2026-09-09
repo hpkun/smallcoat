@@ -9,12 +9,13 @@ from torch import nn
 from torch.distributions import Categorical
 
 from .environment import NTLAction, NTL_AIR, NTL_BOTH, NTL_NONE, NTL_SPACE
-from .models import MultiHeadPPOPolicy
+from .models import CentralValueNetwork, MultiHeadPPOActor
 
 
 @dataclass
 class PPOTransition:
     observation: np.ndarray
+    critic_state: np.ndarray
     air_mask: np.ndarray
     space_mask: np.ndarray
     mode_mask: np.ndarray
@@ -34,15 +35,21 @@ class NTLPPOAgent:
         cfg = config["ppo_training"]
         self.device = torch.device(device)
         self.observation_dim = int(env.ntl_state_dim)
+        self.critic_state_dim = int(env.critic_state_dim)
         torch.manual_seed(seed)
         hidden = tuple(cfg.get("hidden_sizes", (256, 128)))
-        self.policy = MultiHeadPPOPolicy(
+        critic_hidden = tuple(cfg.get("critic_hidden_sizes", (256, 128)))
+        self.actor = MultiHeadPPOActor(
             self.observation_dim,
             env.num_uavs + 1,
             env.num_satellites + 1,
             hidden,
         ).to(self.device)
-        self.optimizer = torch.optim.Adam(self.policy.parameters(), lr=float(cfg["learning_rate"]))
+        self.critic = CentralValueNetwork(self.critic_state_dim, critic_hidden).to(self.device)
+        self.optimizer = torch.optim.Adam(
+            [*self.actor.parameters(), *self.critic.parameters()],
+            lr=float(cfg["learning_rate"]),
+        )
         self.gamma = float(cfg["gamma"])
         self.gae_lambda = float(cfg["gae_lambda"])
         self.clip_ratio = float(cfg["clip_ratio"])
@@ -84,15 +91,18 @@ class NTLPPOAgent:
         context: dict[str, Any],
         deterministic: bool = False,
         active: bool | None = None,
+        include_value: bool = True,
     ) -> tuple[NTLAction, float, float, tuple[np.ndarray, np.ndarray, np.ndarray]]:
         active = bool(context["gate"]) if active is None else bool(active)
         observation = self._tensor(context["ntl_observation"]).unsqueeze(0)
+        critic_state = self._tensor(context["critic_state"]).unsqueeze(0) if include_value else None
         mode_mask = np.asarray(context["mode_mask"], dtype=bool).copy()
         if not active:
             mode_mask[:] = False
             mode_mask[NTL_NONE] = True
         with torch.no_grad():
-            mode_logits, air_logits, space_logits, value = self.policy(observation)
+            mode_logits, air_logits, space_logits = self.actor(observation)
+            value = self.critic(critic_state) if critic_state is not None else torch.zeros(1, device=self.device)
             mode_distribution = Categorical(
                 logits=self._masked(mode_logits, self._tensor(mode_mask, torch.bool).unsqueeze(0))
             )
@@ -140,6 +150,7 @@ class NTLPPOAgent:
             advantages = (advantages - advantages.mean()) / max(float(advantages.std()), 1e-8)
 
         observations = self._tensor(np.stack([item.observation for item in rollout]))
+        critic_states = self._tensor(np.stack([item.critic_state for item in rollout]))
         air_masks = self._tensor(np.stack([item.air_mask for item in rollout]), torch.bool)
         space_masks = self._tensor(np.stack([item.space_mask for item in rollout]), torch.bool)
         mode_masks = self._tensor(np.stack([item.mode_mask for item in rollout]), torch.bool)
@@ -159,7 +170,8 @@ class NTLPPOAgent:
             order = torch.randperm(batch_size, device=self.device)
             for start in range(0, batch_size, self.minibatch_size):
                 batch = order[start : start + self.minibatch_size]
-                mode_logits, air_logits, space_logits, values = self.policy(observations[batch])
+                mode_logits, air_logits, space_logits = self.actor(observations[batch])
+                values = self.critic(critic_states[batch])
                 mode_distribution = Categorical(logits=self._masked(mode_logits, mode_masks[batch]))
                 air_distribution = Categorical(logits=self._masked(air_logits, air_masks[batch]))
                 space_distribution = Categorical(logits=self._masked(space_logits, space_masks[batch]))
@@ -183,7 +195,10 @@ class NTLPPOAgent:
                 loss = policy_loss + self.value_coefficient * value_loss - self.entropy_coefficient * entropy
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.policy.parameters(), self.gradient_clip)
+                nn.utils.clip_grad_norm_(
+                    [*self.actor.parameters(), *self.critic.parameters()],
+                    self.gradient_clip,
+                )
                 self.optimizer.step()
                 losses.append(float(loss.detach().cpu()))
                 policy_losses.append(float(policy_loss.detach().cpu()))
@@ -198,9 +213,21 @@ class NTLPPOAgent:
         }
 
     def state_dict(self) -> dict[str, Any]:
-        return {"policy": self.policy.state_dict(), "optimizer": self.optimizer.state_dict()}
+        return {
+            "actor": self.actor.state_dict(),
+            "critic": self.critic.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+        }
 
     def load_state_dict(self, payload: dict[str, Any], load_optimizer: bool = False) -> None:
-        self.policy.load_state_dict(payload["policy"])
-        if load_optimizer and "optimizer" in payload:
+        if "actor" in payload:
+            self.actor.load_state_dict(payload["actor"])
+            if "critic" in payload:
+                self.critic.load_state_dict(payload["critic"])
+        elif "policy" in payload:
+            # Older D3QN-PPO checkpoints used the actor encoder for the value head.
+            self.actor.load_state_dict(payload["policy"], strict=False)
+        else:
+            raise KeyError("PPO checkpoint contains neither 'actor' nor legacy 'policy' weights")
+        if load_optimizer and "optimizer" in payload and "actor" in payload:
             self.optimizer.load_state_dict(payload["optimizer"])

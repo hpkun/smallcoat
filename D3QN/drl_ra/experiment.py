@@ -165,6 +165,7 @@ def train_hierarchical_agent(
                 pending_ppo = {
                     "transition": {
                         "observation": np.asarray(context["ntl_observation"], dtype=np.float32),
+                        "critic_state": np.asarray(context["critic_state"], dtype=np.float32),
                         "air_mask": stored_masks[0],
                         "space_mask": stored_masks[1],
                         "mode_mask": stored_masks[2],
@@ -226,6 +227,7 @@ def train_hierarchical_agent(
             "ppo_entropy": ppo_stats.get("entropy", float("nan")),
             "ppo_active_steps": ppo_stats.get("active_steps", 0.0),
             "epsilon": epsilon,
+            "ground_lagrange": agent.ground.lagrange,
             **summary,
         }
         history.append(row)

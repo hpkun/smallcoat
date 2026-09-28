@@ -22,6 +22,7 @@ def main() -> None:
     parser.add_argument("--history", default="outputs/d3qn_seed42/history.json")
     parser.add_argument("--output", default="outputs/d3qn_seed42/convergence.png")
     parser.add_argument("--window", type=int, default=50)
+    parser.add_argument("--title", default="D3QN Training Convergence (Seed 42)")
     args = parser.parse_args()
 
     with Path(args.history).open("r", encoding="utf-8") as stream:
@@ -36,7 +37,7 @@ def main() -> None:
         ("Average Latency", "latency_ms", "Latency (ms)", None),
     )
     figure, axes = plt.subplots(3, 1, figsize=(11, 10), sharex=True, constrained_layout=True)
-    figure.suptitle("D3QN Training Convergence (Seed 42)", fontsize=16, fontweight="bold")
+    figure.suptitle(args.title, fontsize=16, fontweight="bold")
     for axis, (title, key, ylabel, limits) in zip(axes, series):
         values = np.asarray([row[key] for row in history], dtype=float)
         smoothed = moving_average(values, args.window)

@@ -114,7 +114,8 @@ def train_agent(
             print(
                 f"episode={episode + 1}/{episodes} reward={total_reward:.2f} "
                 f"TCR={summary['tcr']:.1f}% SR={summary['reliability_pct']:.1f}% "
-                f"cost={summary['expected_cost']:.4f} lambda={agent.lagrange:.3f}"
+                f"CVR={summary['cvr']:.1f}% cost={summary['expected_cost']:.4f} "
+                f"lambda={agent.lagrange:.3f}"
             )
     return agent, history
 
@@ -244,7 +245,8 @@ def train_hierarchical_agent(
         if progress and ((episode + 1) == 1 or (episode + 1) % max(1, episodes // 10) == 0):
             print(
                 f"episode={episode + 1}/{episodes} phase=joint-training reward={total_reward:.2f} "
-                f"TCR={summary['tcr']:.1f}% gate={summary['gate_rate_pct']:.1f}% "
+                f"TCR={summary['tcr']:.1f}% CVR={summary['cvr']:.1f}% "
+                f"gate={summary['gate_rate_pct']:.1f}% "
                 f"replicas={summary['mean_replicas']:.2f}",
                 flush=True,
             )

@@ -79,9 +79,19 @@ class D3QNAgent:
         next_state: np.ndarray,
         done: bool,
         next_mask: np.ndarray,
+        *,
+        discount: float | None = None,
     ) -> float | None:
         lagrangian_reward = float(base_reward - self.lagrange * cost)
-        self.replay.add(state, action, lagrangian_reward, next_state, done, next_mask)
+        self.replay.add(
+            state,
+            action,
+            lagrangian_reward,
+            next_state,
+            done,
+            next_mask,
+            self.gamma if discount is None else float(discount),
+        )
         self.costs.append(float(cost))
         self.training_steps += 1
         if self.constrained and self.training_steps % self.lagrange_update_steps == 0:
@@ -102,10 +112,11 @@ class D3QNAgent:
         next_states = torch.as_tensor(batch.next_states, device=self.device)
         dones = torch.as_tensor(batch.dones, device=self.device)
         masks = torch.as_tensor(batch.next_masks, dtype=torch.bool, device=self.device)
+        discounts = torch.as_tensor(batch.discounts, device=self.device)
         q_values = self.online(states).gather(1, actions).squeeze(1)
         with torch.no_grad():
             next_q = self._next_q_values(next_states, masks)
-            targets = rewards + self.gamma * (1.0 - dones) * next_q
+            targets = rewards + discounts * (1.0 - dones) * next_q
         loss = nn.functional.smooth_l1_loss(q_values, targets)
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -164,19 +175,44 @@ class ReplicaD3QNAgent(D3QNAgent):
             double_q=True,
             constrained=False,
         )
-        self.gamma = float(learned.get("gamma_intra", 1.0))
+        self.gamma_intra = float(learned.get("gamma_intra", 1.0))
+        self.gamma_inter = float(learned.get("gamma_inter", replica_config["training"]["gamma"]))
+        self.gamma = self.gamma_intra
         self.lagrange = 0.0
 
     def observe_sequence(
         self,
         transitions: list[tuple[np.ndarray, int, np.ndarray, bool, np.ndarray]],
         final_reward: float,
+        *,
+        episode_done: bool = True,
+        bootstrap_state: np.ndarray | None = None,
+        bootstrap_mask: np.ndarray | None = None,
     ) -> list[float]:
-        """Store one internal sequence; only its terminal transition gets reward."""
+        """Store one task's decisions and bootstrap its outcome into the next task."""
+        if not transitions:
+            return []
+        if not episode_done and (bootstrap_state is None or bootstrap_mask is None):
+            raise ValueError("a continuing episode requires the next task state and action mask")
         losses: list[float] = []
         for index, (state, action, next_state, done, next_mask) in enumerate(transitions):
-            reward = float(final_reward) if index == len(transitions) - 1 else 0.0
-            loss = self.observe(state, action, reward, 0.0, next_state, done, next_mask)
+            last = index == len(transitions) - 1
+            reward = float(final_reward) if last else 0.0
+            terminal = bool(episode_done) if last else False
+            if last and not episode_done:
+                next_state = bootstrap_state
+                next_mask = bootstrap_mask
+            discount = self.gamma_inter if last else self.gamma_intra
+            loss = self.observe(
+                state,
+                action,
+                reward,
+                0.0,
+                next_state,
+                terminal,
+                next_mask,
+                discount=discount,
+            )
             if loss is not None:
                 losses.append(loss)
         return losses

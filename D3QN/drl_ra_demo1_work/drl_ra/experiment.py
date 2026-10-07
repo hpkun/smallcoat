@@ -75,6 +75,8 @@ class LearnedReplicaAgent:
         self.replica = replica
         self.rng = np.random.default_rng(seed)
         self.last_stop_reason = "not_applicable"
+        self.last_replica_initial_state: np.ndarray | None = None
+        self.last_replica_initial_mask: np.ndarray | None = None
 
     @property
     def lagrange(self) -> float:
@@ -93,6 +95,8 @@ class LearnedReplicaAgent:
         if not bool(env.candidates[primary].available):
             primary = 0
         selected = [int(primary)]
+        self.last_replica_initial_state = env.learned_redundancy_observation(selected).copy()
+        self.last_replica_initial_mask = env.learned_redundancy_action_mask(selected).copy()
         transitions: list[tuple[np.ndarray, int, np.ndarray, bool, np.ndarray]] = []
         max_replicas = int(env.env_cfg["max_replicas"])
         self.last_stop_reason = "not_applicable"
@@ -247,6 +251,7 @@ def train_learned_replica_agent(
         max_replica_stops = 0
         no_feasible_candidate_stops = 0
         done = False
+        pending_replica: tuple[list[tuple[np.ndarray, int, np.ndarray, bool, np.ndarray]], float] | None = None
         while not done:
             state = env._state_from_candidates(env.current_task, env.candidates)
             primary, selected, transitions = agent.decide(
@@ -255,6 +260,19 @@ def train_learned_replica_agent(
             primary_q_values.append(agent.primary.last_q_max)
             if transitions:
                 replica_q_values.append(agent.replica.last_q_max)
+            if pending_replica is not None:
+                if agent.last_replica_initial_state is None or agent.last_replica_initial_mask is None:
+                    raise RuntimeError("the next task's initial replica state was not captured")
+                replica_losses.extend(
+                    agent.replica.observe_sequence(
+                        pending_replica[0],
+                        pending_replica[1],
+                        episode_done=False,
+                        bootstrap_state=agent.last_replica_initial_state,
+                        bootstrap_mask=agent.last_replica_initial_mask,
+                    )
+                )
+                pending_replica = None
             active_stops += int(agent.last_stop_reason == "active_stop")
             max_replica_stops += int(agent.last_stop_reason == "max_replica_stop")
             no_feasible_candidate_stops += int(agent.last_stop_reason == "no_feasible_candidate_stop")
@@ -272,12 +290,16 @@ def train_learned_replica_agent(
                 )
             if primary_loss is not None:
                 primary_losses.append(primary_loss)
-            replica_losses.extend(
-                agent.replica.observe_sequence(
-                    transitions,
-                    constrained_reward,
+            if done:
+                replica_losses.extend(
+                    agent.replica.observe_sequence(
+                        transitions,
+                        constrained_reward,
+                        episode_done=True,
+                    )
                 )
-            )
+            else:
+                pending_replica = (transitions, constrained_reward)
             total_reward += reward
         summary = env.summary()
         summary_aliases = {

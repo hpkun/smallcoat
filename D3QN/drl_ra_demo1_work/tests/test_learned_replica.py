@@ -92,6 +92,49 @@ class LearnedReplicaTests(unittest.TestCase):
         self.assertEqual(stored[-1][2], 1.0)
         self.assertTrue(stored[-1][4])
         self.assertTrue(all(row[2] == 0.0 for row in stored[:-1]))
+        self.assertEqual(stored[-1][6], 0.99)
+
+    def test_replica_task_transition_bootstraps_from_next_task(self):
+        config = tiny_config()
+        env = SAGINEnv(config, seed=31)
+        agent = build_learned_replica_agent(env, config, seed=31, device="cpu")
+        replica = agent.replica
+        state = np.zeros(env.learned_redundancy_state_dim, dtype=np.float32)
+        intra_state = np.ones_like(state)
+        bootstrap_state = np.full_like(state, 2.0)
+        intra_mask = np.ones(env.learned_redundancy_action_dim, dtype=bool)
+        bootstrap_mask = np.zeros_like(intra_mask)
+        bootstrap_mask[-1] = True
+        transitions = [
+            (state, 0, intra_state, False, intra_mask),
+            (intra_state, env.action_dim, intra_state, True, intra_mask),
+        ]
+
+        replica.observe_sequence(
+            transitions,
+            final_reward=1.0,
+            episode_done=False,
+            bootstrap_state=bootstrap_state,
+            bootstrap_mask=bootstrap_mask,
+        )
+
+        first, last = list(replica.replay._data)
+        self.assertEqual(first[2], 0.0)
+        self.assertFalse(first[4])
+        self.assertEqual(first[6], 1.0)
+        np.testing.assert_array_equal(first[3], intra_state)
+        self.assertEqual(last[2], 1.0)
+        self.assertFalse(last[4])
+        self.assertEqual(last[6], 0.99)
+        np.testing.assert_array_equal(last[3], bootstrap_state)
+        np.testing.assert_array_equal(last[5], bootstrap_mask)
+
+    def test_replica_continuation_requires_next_task_state(self):
+        env = SAGINEnv(tiny_config(), seed=32)
+        agent = build_learned_replica_agent(env, tiny_config(), seed=32, device="cpu")
+        _, _, transitions = agent.decide(env, primary_epsilon=0.0, replica_epsilon=0.0)
+        with self.assertRaises(ValueError):
+            agent.replica.observe_sequence(transitions, final_reward=0.5, episode_done=False)
 
     def test_joint_checkpoint_round_trip(self):
         config = tiny_config()
@@ -113,6 +156,17 @@ class LearnedReplicaTests(unittest.TestCase):
         _, history = train_learned_replica_agent(config, seed=30, device="cpu", progress=False)
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["tasks"], 1.0)
+
+    def test_training_bootstraps_between_tasks_and_stops_at_episode_end(self):
+        config = tiny_config()
+        config["training"]["episodes"] = 1
+        config["environment"]["episode_steps"] = 2
+        agent, history = train_learned_replica_agent(config, seed=33, device="cpu", progress=False)
+
+        stored = list(agent.replica.replay._data)
+        self.assertEqual(history[0]["tasks"], 2.0)
+        self.assertEqual(sum(bool(row[4]) for row in stored), 1)
+        self.assertEqual(sum(row[6] == 0.99 for row in stored), 2)
 
 
 if __name__ == "__main__":

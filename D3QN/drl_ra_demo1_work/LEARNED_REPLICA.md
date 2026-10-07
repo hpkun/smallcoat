@@ -36,8 +36,10 @@ joint-training control (`primary_checkpoint: null`, freeze duration zero).
 - Replica actions: 20 execution targets plus `STOP` (21 total), with duplicate
   and unavailable targets masked.
 - The maximum set size remains three and the old `drl-ra` path is unchanged.
-- Replica replay uses `gamma_intra=1`. Only the terminal internal transition
-  receives the task-level constrained reward and does not bootstrap into the
-  next task.
+- Replica replay uses `gamma_intra=1.0` within a task's autoregressive
+  selection sequence. The terminal internal transition receives the
+  task-level constrained reward; between tasks it bootstraps from the next
+  task's initial replica state and action mask with `gamma_inter=0.99`.
+  Bootstrap is disabled only when the system episode itself ends.
 - The environment still uses independent replica-success estimates and its
   original immediate loser-cancellation lifecycle approximation.

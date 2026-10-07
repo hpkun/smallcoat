@@ -39,6 +39,7 @@ training:
   gradient_clip: 10.0
 learned_replica:
   gamma_intra: 1.0
+  gamma_inter: 0.99
   replica_energy_scale_mj: 2000.0
   primary_checkpoint: null
   freeze_primary_episodes: 0

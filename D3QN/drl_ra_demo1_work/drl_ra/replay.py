@@ -14,6 +14,7 @@ class Batch:
     next_states: np.ndarray
     dones: np.ndarray
     next_masks: np.ndarray
+    discounts: np.ndarray
 
 
 class ReplayBuffer:
@@ -32,8 +33,9 @@ class ReplayBuffer:
         next_state: np.ndarray,
         done: bool,
         next_mask: np.ndarray,
+        discount: float,
     ) -> None:
-        self._data.append((state.copy(), action, reward, next_state.copy(), done, next_mask.copy()))
+        self._data.append((state.copy(), action, reward, next_state.copy(), done, next_mask.copy(), discount))
 
     def sample(self, batch_size: int) -> Batch:
         indices = self._rng.choice(len(self._data), size=batch_size, replace=False)
@@ -45,4 +47,5 @@ class ReplayBuffer:
             next_states=np.stack([row[3] for row in rows]).astype(np.float32),
             dones=np.asarray([row[4] for row in rows], dtype=np.float32),
             next_masks=np.stack([row[5] for row in rows]).astype(bool),
+            discounts=np.asarray([row[6] for row in rows], dtype=np.float32),
         )

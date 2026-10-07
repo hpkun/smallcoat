@@ -6,13 +6,13 @@ from copy import deepcopy
 from pathlib import Path
 
 from drl_ra.config import apply_overrides, load_config
-from drl_ra.experiment import train_agent, train_hierarchical_agent, write_json
+from drl_ra.experiment import train_agent, train_hierarchical_agent, train_learned_replica_agent, write_json
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a paper-aligned DRL-RA/D3QN agent.")
     parser.add_argument("--config", default="configs/paper.yaml")
-    parser.add_argument("--method", choices=("drl-ra", "d3qn", "dqn", "no-dueling", "no-double", "no-redundancy", "d3qn-ppo"), default="drl-ra")
+    parser.add_argument("--method", choices=("drl-ra", "d3qn", "dqn", "no-dueling", "no-double", "no-redundancy", "d3qn-ppo", "drl-ra-learned-replica"), default="drl-ra")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output-dir", default="outputs")
@@ -26,6 +26,8 @@ def main() -> None:
     seed = int(config["seed"] if args.seed is None else args.seed)
     if args.method == "d3qn-ppo":
         agent, history = train_hierarchical_agent(deepcopy(config), seed, device=args.device)
+    elif args.method == "drl-ra-learned-replica":
+        agent, history = train_learned_replica_agent(deepcopy(config), seed, device=args.device)
     else:
         agent, history = train_agent(deepcopy(config), args.method, seed, device=args.device)
     run_dir = Path(args.output_dir) / f"{args.method}_seed{seed}"

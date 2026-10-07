@@ -8,14 +8,14 @@ from pathlib import Path
 from drl_ra.baselines import POLICIES
 from drl_ra.config import apply_overrides, load_config
 from drl_ra.environment import SAGINEnv
-from drl_ra.experiment import evaluate_callable, evaluate_hierarchical_agent, train_agent, train_hierarchical_agent, write_json
+from drl_ra.experiment import evaluate_callable, evaluate_hierarchical_agent, evaluate_learned_replica_agent, train_agent, train_hierarchical_agent, train_learned_replica_agent, write_json
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the reproducible paper comparison.")
     parser.add_argument("--config", default="configs/paper.yaml")
     parser.add_argument("--profile", choices=("smoke", "quick", "paper"), default="quick")
-    parser.add_argument("--methods", nargs="+", default=["random", "greedy-nearest", "greedy-reliability", "dqn", "d3qn", "drl-ra", "d3qn-ppo"])
+    parser.add_argument("--methods", nargs="+", default=["random", "greedy-nearest", "greedy-reliability", "dqn", "d3qn", "drl-ra", "drl-ra-learned-replica", "d3qn-ppo"])
     parser.add_argument("--seeds", type=int, nargs="+", default=None)
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--output-dir", default="outputs/reproduction")
@@ -71,6 +71,8 @@ def main() -> None:
                 train_config = deepcopy(method_config)
                 if method == "d3qn-ppo":
                     agent, history = train_hierarchical_agent(train_config, seed, device=args.device, progress=not args.quiet)
+                elif method == "drl-ra-learned-replica":
+                    agent, history = train_learned_replica_agent(train_config, seed, device=args.device, progress=not args.quiet)
                 else:
                     agent, history = train_agent(train_config, method, seed, device=args.device, progress=not args.quiet)
                 checkpoint = output_dir / "checkpoints" / f"{method}_seed{seed}.pt"
@@ -90,6 +92,8 @@ def main() -> None:
                     print(f"  evaluating seed={evaluation_seed}", flush=True)
                 if method == "d3qn-ppo":
                     evaluation, _ = evaluate_hierarchical_agent(evaluation_config, agent, [evaluation_seed])
+                elif method == "drl-ra-learned-replica":
+                    evaluation, _ = evaluate_learned_replica_agent(evaluation_config, agent, [evaluation_seed])
                 else:
                     def policy(state, env: SAGINEnv, rng, selected=agent):
                         return selected.act(state, [candidate.available for candidate in env.candidates], epsilon=0.0)
@@ -116,13 +120,26 @@ def main() -> None:
         print(f"{method:20s} TCR={aggregate['tcr']['mean']:.2f}% SR={aggregate['reliability_pct']['mean']:.2f}% CVR={aggregate['cvr']['mean']:.2f}%")
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "results.json", {"profile": args.profile, "seeds": seeds, "methods": all_results})
-    metrics = ("tcr", "deadline_satisfaction_pct", "latency_ms", "energy_mj", "reliability_pct", "resource_utilization_pct", "decision_latency_ms", "cvr", "expected_cost", "mean_replicas")
+    metrics = (
+        "tcr", "deadline_satisfaction_pct", "latency_ms", "energy_mj",
+        "reliability_pct", "resource_utilization_pct", "decision_latency_ms",
+        "cvr", "expected_cost", "mean_replicas", "replica_1_pct",
+        "replica_2_pct", "replica_3_pct", "cross_layer_pct",
+        "mean_reliability_gap", "mean_replica_energy_overhead_mj",
+        "mean_replica_capacity_overhead", "rejected_replica_selections",
+    )
     with (output_dir / "summary.csv").open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.writer(stream)
         writer.writerow(["method", *[f"{metric}_mean" for metric in metrics], *[f"{metric}_std" for metric in metrics]])
         for method, result in all_results.items():
             aggregate = result["aggregate"]
-            writer.writerow([method, *[aggregate[metric]["mean"] for metric in metrics], *[aggregate[metric]["std"] for metric in metrics]])
+            writer.writerow(
+                [
+                    method,
+                    *[aggregate.get(metric, {}).get("mean", float("nan")) for metric in metrics],
+                    *[aggregate.get(metric, {}).get("std", float("nan")) for metric in metrics],
+                ]
+            )
     print(f"saved reproduction results to {output_dir.resolve()}")
 
 

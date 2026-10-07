@@ -52,17 +52,23 @@ class D3QNAgent:
         self.lagrange_update_steps = int(train["lagrange_update_steps"])
         self.costs: deque[float] = deque(maxlen=int(train["cost_window"]))
         self.training_steps = 0
+        self.last_q_max = float("nan")
+        self.last_q_mean = float("nan")
 
     def act(self, state: np.ndarray, action_mask: np.ndarray, epsilon: float = 0.0) -> int:
         available = np.flatnonzero(action_mask)
         if len(available) == 0:
             raise RuntimeError("environment supplied an empty action mask")
-        if self.rng.random() < epsilon:
-            return int(self.rng.choice(available))
         tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
         mask = torch.as_tensor(action_mask, dtype=torch.bool, device=self.device).unsqueeze(0)
         with torch.no_grad():
-            return int(masked_q_values(self.online(tensor), mask).argmax(dim=1).item())
+            q_values = masked_q_values(self.online(tensor), mask)
+            self.last_q_max = float(q_values.max().item())
+            self.last_q_mean = float(q_values[q_values > -1e8].mean().item())
+            greedy_action = int(q_values.argmax(dim=1).item())
+        if self.rng.random() < epsilon:
+            return int(self.rng.choice(available))
+        return greedy_action
 
     def observe(
         self,
@@ -138,3 +144,39 @@ class D3QNAgent:
             self.optimizer.load_state_dict(payload["optimizer"])
         self.lagrange = float(payload.get("lagrange", self.lagrange))
         return dict(payload.get("metadata", {}))
+
+
+class ReplicaD3QNAgent(D3QNAgent):
+    """Independent D3QN selector for within-task replica placement."""
+
+    def __init__(self, state_dim: int, action_dim: int, config: dict[str, Any], seed: int, device: str | torch.device = "cpu") -> None:
+        replica_config = dict(config)
+        replica_config["training"] = dict(config["training"])
+        learned = config.get("learned_replica", {})
+        replica_config["training"].update(learned.get("training", {}))
+        super().__init__(
+            state_dim,
+            action_dim,
+            replica_config,
+            seed,
+            device=device,
+            dueling=True,
+            double_q=True,
+            constrained=False,
+        )
+        self.gamma = float(learned.get("gamma_intra", 1.0))
+        self.lagrange = 0.0
+
+    def observe_sequence(
+        self,
+        transitions: list[tuple[np.ndarray, int, np.ndarray, bool, np.ndarray]],
+        final_reward: float,
+    ) -> list[float]:
+        """Store one internal sequence; only its terminal transition gets reward."""
+        losses: list[float] = []
+        for index, (state, action, next_state, done, next_mask) in enumerate(transitions):
+            reward = float(final_reward) if index == len(transitions) - 1 else 0.0
+            loss = self.observe(state, action, reward, 0.0, next_state, done, next_mask)
+            if loss is not None:
+                losses.append(loss)
+        return losses

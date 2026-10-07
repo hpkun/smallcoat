@@ -37,6 +37,20 @@ training:
   hidden_sizes: [256, 128, 64]
   lambda_initial: 1.0
   gradient_clip: 10.0
+learned_replica:
+  gamma_intra: 1.0
+  replica_energy_scale_mj: 2000.0
+  primary_checkpoint: null
+  freeze_primary_episodes: 0
+  epsilon_start: 1.0
+  epsilon_end: 0.01
+  epsilon_decay: 0.995
+  training:
+    learning_rate: 0.0001
+    replay_capacity: 100000
+    batch_size: 64
+    target_update_steps: 500
+    hidden_sizes: [256, 128, 64]
 ground_training:
   learning_rate: 0.0001
   hidden_sizes: [256, 128, 64]

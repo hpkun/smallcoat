@@ -9,7 +9,7 @@ import torch
 from drl_ra.baselines import POLICIES
 from drl_ra.config import apply_overrides, load_config
 from drl_ra.environment import SAGINEnv
-from drl_ra.experiment import build_agent, build_hierarchical_agent, evaluate_callable, evaluate_hierarchical_agent, write_json
+from drl_ra.experiment import build_agent, build_hierarchical_agent, build_learned_replica_agent, evaluate_callable, evaluate_hierarchical_agent, evaluate_learned_replica_agent, write_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +50,9 @@ def main() -> None:
                 hierarchical_agent.load_components(args.ground_checkpoint, args.ppo_checkpoint)
             else:
                 hierarchical_agent.load(args.checkpoint)
+        elif method == "drl-ra-learned-replica":
+            hierarchical_agent = build_learned_replica_agent(probe, config, int(metadata.get("seed", 0)), args.device)
+            hierarchical_agent.load(args.checkpoint)
         else:
             agent = build_agent(method, probe, config, int(metadata.get("seed", 0)), args.device)
             agent.load(args.checkpoint)
@@ -59,6 +62,7 @@ def main() -> None:
                 return agent.act(state, mask, epsilon=0.0)
     else:
         config = apply_overrides(config, args.set)
+        method = args.method
         baseline = POLICIES[args.method]
 
         def policy(state, env, rng):
@@ -66,7 +70,9 @@ def main() -> None:
             return baseline(mask, env.candidates, env.current_task, rng)
     if not any(item.startswith("environment.episode_steps=") for item in args.set):
         config["environment"]["episode_steps"] = int(config["training"].get("evaluation_steps", config["environment"]["episode_steps"]))
-    if hierarchical_agent is not None:
+    if method == "drl-ra-learned-replica":
+        rows, aggregate = evaluate_learned_replica_agent(config, hierarchical_agent, args.seeds)
+    elif hierarchical_agent is not None:
         rows, aggregate = evaluate_hierarchical_agent(config, hierarchical_agent, args.seeds)
     else:
         rows, aggregate = evaluate_callable(config, policy, args.seeds)

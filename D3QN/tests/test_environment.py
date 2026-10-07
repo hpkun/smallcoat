@@ -115,3 +115,15 @@ class EnvironmentTests(unittest.TestCase):
         env.current_time_s = 1.1
         env._release_completed_allocations()
         self.assertEqual(env.used_capacity[1], 0.0)
+
+    def test_replica_audit_reports_feasibility_and_oracle(self):
+        env = SAGINEnv(tiny_config(), seed=11)
+        _, info = env.reset(seed=11)
+        primary = env.candidates[int(np.flatnonzero(info["action_mask"])[0])]
+        audit = env.replica_audit(primary, [primary], "active_stop")
+        self.assertGreaterEqual(audit["num_feasible_candidates"], 1)
+        self.assertLessEqual(audit["max_reliability_all"], 1.0)
+        self.assertIn(audit["min_replicas_to_requirement"], (-1, 1, 2, 3))
+        self.assertIn(audit["reward_optimal_replica_count"], (1, 2, 3))
+        self.assertEqual(audit["active_stop"], 1)
+        self.assertEqual(audit["max_replica_stop"], 0)

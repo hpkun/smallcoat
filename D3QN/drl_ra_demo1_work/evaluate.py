@@ -9,7 +9,7 @@ import torch
 from drl_ra.baselines import POLICIES
 from drl_ra.config import apply_overrides, load_config
 from drl_ra.environment import SAGINEnv
-from drl_ra.experiment import build_agent, build_hierarchical_agent, build_learned_replica_agent, evaluate_callable, evaluate_hierarchical_agent, evaluate_learned_replica_agent, write_json
+from drl_ra.experiment import build_agent, build_hierarchical_agent, build_joint_agent, build_learned_replica_agent, evaluate_callable, evaluate_hierarchical_agent, evaluate_joint_agent, evaluate_learned_replica_agent, write_json
 
 
 def parse_args() -> argparse.Namespace:
@@ -30,6 +30,7 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     hierarchical_agent = None
+    joint_agent = None
     if args.method == "checkpoint":
         component_mode = bool(args.ground_checkpoint or args.ppo_checkpoint)
         if component_mode and not (args.ground_checkpoint and args.ppo_checkpoint):
@@ -44,7 +45,10 @@ def main() -> None:
             config = deepcopy(metadata["config"])
         config = apply_overrides(config, args.set)
         probe = SAGINEnv(config, seed=args.seeds[0])
-        if method == "d3qn-ppo":
+        if method in ("joint-d3qn", "drl-ra-resource"):
+            joint_agent = build_joint_agent(probe, config, int(metadata.get("seed", 0)), args.device, analytic_replicas=method == "drl-ra-resource")
+            joint_agent.load(args.checkpoint)
+        elif method == "d3qn-ppo":
             hierarchical_agent = build_hierarchical_agent(probe, config, int(metadata.get("seed", 0)), args.device)
             if component_mode:
                 hierarchical_agent.load_components(args.ground_checkpoint, args.ppo_checkpoint)
@@ -70,7 +74,9 @@ def main() -> None:
             return baseline(mask, env.candidates, env.current_task, rng)
     if not any(item.startswith("environment.episode_steps=") for item in args.set):
         config["environment"]["episode_steps"] = int(config["training"].get("evaluation_steps", config["environment"]["episode_steps"]))
-    if method == "drl-ra-learned-replica":
+    if joint_agent is not None:
+        rows, aggregate = evaluate_joint_agent(config, joint_agent, args.seeds)
+    elif method == "drl-ra-learned-replica":
         rows, aggregate = evaluate_learned_replica_agent(config, hierarchical_agent, args.seeds)
     elif hierarchical_agent is not None:
         rows, aggregate = evaluate_hierarchical_agent(config, hierarchical_agent, args.seeds)

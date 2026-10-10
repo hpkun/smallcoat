@@ -48,6 +48,8 @@ class Candidate:
     required_capacity: float
     distance_km: float = float("inf")
     relay_uav: int | None = None
+    link_rate_bps: float = 0.0
+    compute_capacity: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -97,6 +99,7 @@ class SAGINEnv:
         self.state_dim = 8 + 5 * self.action_dim
         self.learned_redundancy_state_dim = self.state_dim + self.action_dim + 4
         self.learned_redundancy_action_dim = self.action_dim + 1
+        self.joint_state_dim = 4 + 7 * self.action_dim + 2 * self.action_dim + 1
         self.ground_action_dim = 2 + self.num_edges
         self.ground_trigger_action = self.ground_action_dim - 1
         self.ground_state_dim = 7 + 7 * (1 + self.num_edges)
@@ -211,6 +214,8 @@ class SAGINEnv:
         return action == 0 or self.available_capacity[action] >= required
 
     def _service_time(self, candidate: Candidate, task: Task) -> float:
+        if candidate.compute_capacity > 0.0:
+            return task.cycles / candidate.compute_capacity
         if candidate.action == 0:
             return task.cycles / self.local_capacity[task.device]
         return task.cycles / self.total_capacity[candidate.action]
@@ -224,7 +229,7 @@ class SAGINEnv:
         delay = compute + queue
         energy = 1e3 * 1e-27 * self.local_capacity[task.device] ** 2 * task.cycles
         reliability = 0.999 * self._delay_reliability(delay, task.deadline_s)
-        return Candidate(0, "local", True, delay, energy, reliability, 1.0, 0.999, queue, self._required_capacity(task), 0.0)
+        return Candidate(0, "local", True, delay, energy, reliability, 1.0, 0.999, queue, self._required_capacity(task), 0.0, None, float("inf"))
 
     def _edge_candidate(self, task: Task, position: np.ndarray, index: int) -> Candidate:
         action = 1 + index
@@ -244,7 +249,7 @@ class SAGINEnv:
         available = distance <= coverage and self._has_capacity(action, required)
         reliability = link_rel * node_rel * self._delay_reliability(delay, task.deadline_s)
         energy = 1e3 * (0.8 * transmission + 0.05 * (queue + compute))
-        return Candidate(action, "edge", available, delay, energy, reliability, link_rel, node_rel, queue, required, distance)
+        return Candidate(action, "edge", available, delay, energy, reliability, link_rel, node_rel, queue, required, distance, None, rate)
 
     def _uav_link(self, position: np.ndarray, index: int, data_bits: float) -> tuple[float, float, float, bool]:
         distance = float(np.linalg.norm(position - self._uav_positions()[index]))
@@ -268,7 +273,8 @@ class SAGINEnv:
         available = in_range and battery_ok and self._has_capacity(action, required)
         reliability = link_rel * node_rel * self._delay_reliability(delay, task.deadline_s)
         energy = 1e3 * (0.8 * transmission + 0.05 * (queue + compute))
-        return Candidate(action, "uav", available, delay, energy, reliability, link_rel, node_rel, queue, required, distance)
+        rate = task.data_bits / max(transmission - 0.010, 1e-9)
+        return Candidate(action, "uav", available, delay, energy, reliability, link_rel, node_rel, queue, required, distance, None, rate)
 
     def _channel_uniform(
         self, satellite: int, field: str, low: float, high: float,
@@ -301,10 +307,11 @@ class SAGINEnv:
             relay_queue = 1.0 / max(service_rate - self.relay_arrival_rate[uav_index], 1e-6)
             relay_delay = uplink + task.data_bits / effective_rate + relay_queue + self._channel_uniform(index, "relay_delay", 0.02, 0.20, uav_index)
             relay_options.append((relay_delay, uplink_rel * float(np.exp(-rain_db / 12.0) * scintillation), uav_index))
-        path_delay, link_rel = direct_delay, direct_rel
+        path_delay, link_rel, link_rate = direct_delay, direct_rel, direct_rate
         relay_uav = None
         if relay_options and min(relay_options, key=lambda item: item[0])[0] < path_delay:
             path_delay, link_rel, relay_uav = min(relay_options, key=lambda item: item[0])
+            link_rate = task.data_bits / max(path_delay, 1e-9)
         queue = self._queue_for(action, task.device)
         compute = task.cycles / self.total_capacity[action]
         delay = path_delay + queue + compute + 0.01
@@ -313,7 +320,7 @@ class SAGINEnv:
         node_rel = 0.999 if available else 0.0
         reliability = link_rel * node_rel * self._delay_reliability(delay, task.deadline_s)
         energy = 1e3 * (1.2 * path_delay + 0.05 * (queue + compute))
-        return Candidate(action, "satellite", available, delay, energy, reliability, link_rel, node_rel, queue, required, float("inf"), relay_uav)
+        return Candidate(action, "satellite", available, delay, energy, reliability, link_rel, node_rel, queue, required, float("inf"), relay_uav, link_rate)
 
     def _candidate_evaluations(self, task: Task) -> list[Candidate]:
         position = self.device_positions[task.device]
@@ -331,6 +338,105 @@ class SAGINEnv:
         candidates = self._candidate_evaluations(task)
         self._last_candidates = candidates
         return self._state_from_candidates(task, candidates), np.asarray([candidate.available for candidate in candidates], dtype=bool)
+
+    def joint_observation(
+        self, selected_actions: list[int] | None = None, replica_count: int = 1
+    ) -> np.ndarray:
+        """Task plus resource, queue, reliability, and link features per node."""
+        assert self.current_task is not None
+        task = self.current_task
+        header = np.asarray(
+            [
+                np.log1p(task.data_bits) / 18.0,
+                np.log1p(task.cycles) / 24.0,
+                min(task.deadline_s / 120.0, 1.0),
+                task.reliability_required,
+            ],
+            dtype=np.float32,
+        )
+        features: list[float] = []
+        for candidate in self._last_candidates:
+            if candidate.action == 0:
+                total = float(self.local_capacity[task.device])
+                available = total
+                load = 0.0
+                rate = 1.0
+            else:
+                total = float(self.total_capacity[candidate.action])
+                available = float(self.available_capacity[candidate.action])
+                load = float((self.used_capacity[candidate.action] + self.reserved_capacity[candidate.action]) / max(total, 1e-9))
+                rate = min(float(candidate.link_rate_bps) / 500e6, 1.0)
+            features.extend(
+                (
+                    min(available / max(total, 1e-9), 1.0),
+                    min(load, 1.0),
+                    min(available / max(candidate.required_capacity, 1e-9), 1.0),
+                    min(candidate.queue_s / max(task.deadline_s, 1e-9), 1.0),
+                    candidate.reliability,
+                    rate,
+                    candidate.link_reliability,
+                )
+            )
+        selected = np.zeros(self.action_dim, dtype=np.float32)
+        primary = np.zeros(self.action_dim, dtype=np.float32)
+        if selected_actions:
+            primary[int(selected_actions[0])] = 1.0
+        for action in selected_actions or []:
+            if 0 <= int(action) < self.action_dim:
+                selected[int(action)] = 1.0
+        context = np.asarray([min(max(int(replica_count), 1), int(self.env_cfg["max_replicas"])) / max(int(self.env_cfg["max_replicas"]), 1)], dtype=np.float32)
+        state = np.concatenate((header, np.asarray(features, dtype=np.float32), selected, primary, context))
+        if state.shape != (self.joint_state_dim,):
+            raise RuntimeError("joint state dimension is inconsistent")
+        return state
+
+    def joint_resource_mask(self, replica_actions: list[int], resource_levels: list[float] | tuple[float, ...]) -> np.ndarray:
+        """Mask levels that cannot provide the task's minimum compute rate."""
+        assert self.current_task is not None
+        return np.asarray([
+            0 < float(ratio) <= 1 and all(
+                self._candidate_with_resource(self._last_candidates[action], ratio).available
+                for action in replica_actions
+            ) for ratio in resource_levels
+        ], dtype=bool)
+
+    def _candidate_with_resource(self, candidate: Candidate, resource_ratio: float) -> Candidate:
+        """Re-evaluate a fixed candidate under the selected compute share."""
+        assert self.current_task is not None
+        task = self.current_task
+        if candidate.action == 0:
+            available = float(self.local_capacity[task.device])
+        else:
+            available = float(self.available_capacity[candidate.action])
+        allocated = max(float(resource_ratio) * available, 1e-9)
+        old_compute = self._service_time(candidate, task)
+        compute = task.cycles / allocated
+        delay = max(0.0, candidate.delay_s - old_compute) + compute
+        if candidate.action == 0:
+            energy = 1e3 * 1e-27 * allocated**2 * task.cycles
+        else:
+            energy = max(0.0, candidate.energy_mj - 50.0 * old_compute) + 50.0 * compute
+        reliability = candidate.link_reliability * candidate.node_availability * self._delay_reliability(delay, task.deadline_s)
+        feasible = candidate.available and (candidate.action == 0 or allocated >= candidate.required_capacity)
+        if candidate.layer == "satellite":
+            _, remaining = self._satellite_state(candidate.action - 1 - self.num_edges - self.num_uavs)
+            feasible = feasible and remaining >= delay + float(self.env_cfg["satellite_safety_margin_s"])
+        return Candidate(
+            candidate.action,
+            candidate.layer,
+            feasible,
+            delay,
+            energy,
+            reliability,
+            candidate.link_reliability,
+            candidate.node_availability,
+            candidate.queue_s,
+            allocated,
+            candidate.distance_km,
+            candidate.relay_uav,
+            candidate.link_rate_bps,
+            allocated,
+        )
 
     def learned_redundancy_observation(self, selected_actions: list[int]) -> np.ndarray:
         """Build the conditional state from the fixed current-task snapshot."""
@@ -746,11 +852,13 @@ class SAGINEnv:
         invalid: bool,
         raw_action: int,
         audit: dict[str, float | int | None] | None = None,
+        resource_ratio: float | None = None,
     ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
         """Execute and settle one complete task without re-sampling candidates."""
         assert self.current_task is not None
         task = self.current_task
         self._reserve(replicas)
+        compute_utilization = float((self.used_capacity.sum() + self.reserved_capacity.sum()) / max(self.total_capacity.sum(), 1e-9))
         set_reliability = combined_reliability(replicas)
         successful_replicas = [item for item in replicas if self._replica_succeeds(item)]
         winner = min(successful_replicas, key=lambda item: item.delay_s) if successful_replicas else None
@@ -762,9 +870,23 @@ class SAGINEnv:
         cost = smooth_shortfall(task.reliability_required - set_reliability, float(self.env_cfg["cost_temperature"]))
         latency_normalized = min(latency / max(task.deadline_s, 1e-6), 3.0)
         energy_normalized = min(energy / 2000.0, 3.0)
-        smooth_met = sigmoid((set_reliability - task.reliability_required) / float(self.env_cfg["tau_smooth"]))
         performance = -float(self.reward_cfg["latency"]) * latency_normalized - float(self.reward_cfg["energy"]) * energy_normalized
-        reward = performance + float(self.reward_cfg["reliability"]) * set_reliability * smooth_met - float(self.reward_cfg["violation"]) * cost - (1.0 if invalid else 0.0)
+        primary_reliability = selected.reliability
+        reliability_gain = max(0.0, set_reliability - primary_reliability)
+        resource_cost = 0.0 if resource_ratio is None else float(resource_ratio) * len(replicas) / max(int(self.env_cfg["max_replicas"]), 1)
+        if resource_ratio is None:
+            smooth_met = sigmoid((set_reliability - task.reliability_required) / float(self.env_cfg["tau_smooth"]))
+            reliability_reward = float(self.reward_cfg["reliability"]) * set_reliability * smooth_met
+        else:
+            reliability_reward = float(self.reward_cfg["reliability"]) * reliability_gain
+        penalty_cost = cost if resource_ratio is None else max(0.0, task.reliability_required - set_reliability)
+        reward = (
+            performance
+            + reliability_reward
+            - float(self.reward_cfg["violation"]) * penalty_cost
+            - float(self.reward_cfg.get("resource", 0.0)) * resource_cost
+            - (1.0 if invalid else 0.0)
+        )
         # The first successful replica becomes used capacity; every loser is canceled immediately.
         self._cancel_losers(replicas, winner)
         if winner is not None:
@@ -788,6 +910,8 @@ class SAGINEnv:
             "latency_s": latency,
             "energy_mj": energy,
             "reliability": set_reliability,
+            "primary_reliability": primary_reliability,
+            "reliability_gain": reliability_gain,
             "required_reliability": task.reliability_required,
             "reliability_gap": max(0.0, task.reliability_required - set_reliability),
             "reliability_shortfall": max(0.0, task.reliability_required - set_reliability),
@@ -814,6 +938,9 @@ class SAGINEnv:
             "invalid": int(invalid),
             "reserved_after_event": float(self.reserved_capacity.sum()),
             "used_after_event": float(self.used_capacity.sum()),
+            "resource_ratio": 1.0 if resource_ratio is None else float(resource_ratio),
+            "resource_cost": resource_cost,
+            "compute_utilization": compute_utilization,
         }
         if audit is not None:
             record.update(audit)
@@ -872,6 +999,39 @@ class SAGINEnv:
                 "stop_reason": stop_reason,
                 "infeasible": int(stop_reason == "infeasible"),
             },
+        )
+
+    def step_joint(
+        self,
+        replica_actions: list[int],
+        resource_ratio: float,
+    ) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        """Execute a joint node, replica-set, and compute-resource decision."""
+        actions = [int(action) for action in replica_actions]
+        max_replicas = int(self.env_cfg["max_replicas"])
+        if not 1 <= len(actions) <= max_replicas:
+            raise ValueError(f"replica set size must be in [1, {max_replicas}]")
+        if len(set(actions)) != len(actions):
+            raise ValueError("replica set contains duplicate actions")
+        if any(not 0 <= action < self.action_dim for action in actions):
+            raise ValueError("replica set contains an out-of-range action")
+        if not 0.0 < float(resource_ratio) <= 1.0:
+            raise ValueError("resource ratio must be in (0, 1]")
+        original = [self._last_candidates[action] for action in actions]
+        unavailable = [item.action for item in original if not item.available]
+        if unavailable:
+            raise ValueError(f"replica set contains unavailable actions: {unavailable}")
+        replicas = [self._candidate_with_resource(item, resource_ratio) for item in original]
+        underprovisioned = [item.action for item in replicas if not item.available]
+        if underprovisioned:
+            raise ValueError(f"resource level under-provisions actions: {underprovisioned}")
+        return self._execute_replica_set(
+            replicas,
+            replicas[0],
+            invalid=False,
+            raw_action=actions[0],
+            audit={**self.replica_audit(replicas[0], replicas), "stop_reason": "joint_policy"},
+            resource_ratio=float(resource_ratio),
         )
 
     def step_hierarchical(
@@ -1011,6 +1171,13 @@ class SAGINEnv:
             return {}
         numeric = lambda key: np.asarray([float(row[key]) for row in self._metrics], dtype=np.float64)
         result = {"tasks": float(len(self._metrics)), "tcr": float(100.0 * numeric("completed").mean()), "deadline_satisfaction_pct": float(100.0 * numeric("deadline_met").mean()), "latency_ms": float(1000.0 * numeric("latency_s").mean()), "energy_mj": float(numeric("energy_mj").mean()), "reliability_pct": float(100.0 * numeric("reliability").mean()), "resource_utilization_pct": float(100.0 * numeric("edge_utilization").mean()), "cvr": float(100.0 * numeric("violation").mean()), "expected_cost": float(numeric("cost").mean()), "mean_replicas": float(numeric("replicas").mean()), "mean_reserved_after_event": float(numeric("reserved_after_event").mean()), "reliability_shortfall": float(numeric("reliability_shortfall").mean()), "reliability_excess": float(numeric("reliability_excess").mean())}
+        if "reliability_gain" in self._metrics[0]:
+            result.update(
+                mean_reliability_gain=float(numeric("reliability_gain").mean()),
+                mean_resource_ratio=float(numeric("resource_ratio").mean()),
+                mean_resource_cost=float(numeric("resource_cost").mean()),
+                compute_utilization_pct=float(100.0 * numeric("compute_utilization").mean()),
+            )
         if "replica_1" in self._metrics[0]:
             result.update(
                 replica_1_pct=float(100.0 * numeric("replica_1").mean()),

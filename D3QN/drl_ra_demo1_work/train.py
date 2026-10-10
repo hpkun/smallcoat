@@ -8,13 +8,13 @@ from pathlib import Path
 import torch
 
 from drl_ra.config import apply_overrides, load_config
-from drl_ra.experiment import train_agent, train_hierarchical_agent, train_learned_replica_agent, write_json
+from drl_ra.experiment import train_agent, train_hierarchical_agent, train_joint_agent, train_learned_replica_agent, write_json
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train a paper-aligned DRL-RA/D3QN agent.")
     parser.add_argument("--config", default="configs/paper.yaml")
-    parser.add_argument("--method", choices=("drl-ra", "d3qn", "dqn", "no-dueling", "no-double", "no-redundancy", "d3qn-ppo", "drl-ra-learned-replica"), default="drl-ra")
+    parser.add_argument("--method", choices=("drl-ra", "d3qn", "dqn", "no-dueling", "no-double", "no-redundancy", "d3qn-ppo", "drl-ra-learned-replica", "joint-d3qn", "drl-ra-resource"), default="drl-ra")
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--device", default="auto", help="auto selects CUDA when available, otherwise CPU; explicit devices such as cuda:0 are also supported.")
     parser.add_argument("--output-dir", default="outputs")
@@ -36,7 +36,9 @@ def main() -> None:
         torch.set_num_threads(args.torch_threads)
     config = apply_overrides(load_config(args.config), args.set)
     seed = int(config["seed"] if args.seed is None else args.seed)
-    if args.method == "d3qn-ppo":
+    if args.method in ("joint-d3qn", "drl-ra-resource"):
+        agent, history = train_joint_agent(deepcopy(config), seed, device=args.device, metrics_only=args.metrics_only, analytic_replicas=args.method == "drl-ra-resource")
+    elif args.method == "d3qn-ppo":
         agent, history = train_hierarchical_agent(deepcopy(config), seed, device=args.device)
     elif args.method == "drl-ra-learned-replica":
         agent, history = train_learned_replica_agent(deepcopy(config), seed, device=args.device, metrics_only=args.metrics_only)

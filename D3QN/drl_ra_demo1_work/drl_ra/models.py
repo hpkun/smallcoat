@@ -39,6 +39,46 @@ class QNetwork(nn.Module):
         return value + advantage - advantage.mean(dim=-1, keepdim=True)
 
 
+class JointQNetwork(nn.Module):
+    """Shared encoder with autoregressive D3QN heads for a joint action."""
+
+    def __init__(
+        self,
+        state_dim: int,
+        action_dim: int,
+        max_replicas: int,
+        resource_levels: int,
+        hidden_sizes: list[int] | tuple[int, ...] = (256, 128, 64),
+    ) -> None:
+        super().__init__()
+        if len(hidden_sizes) < 1:
+            raise ValueError("at least one hidden layer is required")
+        layers: list[nn.Module] = []
+        previous = state_dim
+        for width in hidden_sizes:
+            layers.extend((nn.Linear(previous, width), nn.ReLU()))
+            previous = width
+        self.encoder = nn.Sequential(*layers)
+        dimensions = {
+            "primary": action_dim,
+            "replica_count": max_replicas,
+            "replica_node": action_dim,
+            "resource": resource_levels,
+        }
+        self.values = nn.ModuleDict({name: nn.Linear(previous, 1) for name in dimensions})
+        self.advantages = nn.ModuleDict(
+            {name: nn.Linear(previous, width) for name, width in dimensions.items()}
+        )
+
+    def forward(self, state: torch.Tensor, head: str) -> torch.Tensor:
+        if head not in self.advantages:
+            raise KeyError(f"unknown joint action head: {head}")
+        features = self.encoder(state)
+        value = self.values[head](features)
+        advantage = self.advantages[head](features)
+        return value + advantage - advantage.mean(dim=-1, keepdim=True)
+
+
 def masked_q_values(q_values: torch.Tensor, action_mask: torch.Tensor) -> torch.Tensor:
     """Exclude unavailable UAV/satellite actions from selection."""
     return q_values.masked_fill(~action_mask.bool(), torch.finfo(q_values.dtype).min)

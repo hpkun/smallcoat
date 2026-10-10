@@ -10,7 +10,7 @@ from typing import Any, Callable
 import numpy as np
 import torch
 
-from .agent import D3QNAgent, ReplicaD3QNAgent
+from .agent import D3QNAgent, JointD3QNAgent, ReplicaD3QNAgent
 from .environment import NTLAction, NTL_NONE, SAGINEnv
 from .hierarchical import HierarchicalAgent
 from .ppo import PPOTransition
@@ -176,6 +176,74 @@ def build_learned_replica_agent(env: SAGINEnv, config: dict[str, Any], seed: int
 
 def build_hierarchical_agent(env: SAGINEnv, config: dict[str, Any], seed: int, device: str) -> HierarchicalAgent:
     return HierarchicalAgent(env, config, seed, device=device)
+
+
+def build_joint_agent(env: SAGINEnv, config: dict[str, Any], seed: int, device: str, analytic_replicas: bool = False) -> JointD3QNAgent:
+    return JointD3QNAgent(env, config, seed, device=device, analytic_replicas=analytic_replicas)
+
+
+def train_joint_agent(
+    config: dict[str, Any], seed: int, device: str = "cpu", progress: bool = True,
+    metrics_only: bool = False,
+    analytic_replicas: bool = False,
+) -> tuple[JointD3QNAgent, list[dict[str, float]]]:
+    seed_everything(seed)
+    env_type = MetricsOnlySAGINEnv if metrics_only else SAGINEnv
+    env = env_type(config, seed=seed)
+    agent = build_joint_agent(env, config, seed, device, analytic_replicas=analytic_replicas)
+    train_cfg = config["training"]
+    epsilon = float(train_cfg["epsilon_start"])
+    episodes = int(train_cfg["episodes"])
+    history: list[dict[str, float]] = []
+    for episode in range(episodes):
+        env.reset(seed=seed * 10_000 + episode)
+        total_reward = 0.0
+        losses: list[float] = []
+        done = False
+        while not done:
+            _, selected, ratio, transitions = agent.decide(env, epsilon)
+            _, reward, terminated, truncated, info = env.step_joint(selected, ratio)
+            done = terminated or truncated
+            losses.extend(agent.observe_sequence(
+                transitions, reward, env.joint_observation(), done,
+                agent._node_mask(env), cost=float(info["cost"]),
+            ))
+            total_reward += reward
+        summary = env.summary()
+        history.append({"episode": float(episode + 1), "reward": total_reward,
+                        "loss": float(np.mean(losses)) if losses else float("nan"),
+                        "epsilon": epsilon, "lagrange": agent.lagrange, **summary})
+        epsilon = max(float(train_cfg["epsilon_end"]), epsilon * float(train_cfg["epsilon_decay"]))
+        if progress and (episode == 0 or (episode + 1) % max(1, episodes // 10) == 0):
+            method = "drl-ra-resource" if analytic_replicas else "joint-d3qn"
+            print(f"episode={episode + 1}/{episodes} {method} reward={total_reward:.2f} "
+                  f"TCR={summary['tcr']:.1f}% CVR={summary['cvr']:.1f}% "
+                  f"replicas={summary['mean_replicas']:.2f}", flush=True)
+    return agent, history
+
+
+def evaluate_joint_agent(
+    config: dict[str, Any], agent: JointD3QNAgent, seeds: list[int],
+) -> tuple[list[dict[str, float]], dict[str, dict[str, float]]]:
+    rows: list[dict[str, float]] = []
+    for seed in seeds:
+        seed_everything(seed)
+        env = SAGINEnv(config, seed=seed)
+        env.reset(seed=seed)
+        decision_times: list[float] = []
+        done = False
+        while not done:
+            start = time.perf_counter_ns()
+            _, selected, ratio, _ = agent.decide(env)
+            decision_times.append((time.perf_counter_ns() - start) / 1e6)
+            _, _, terminated, truncated, _ = env.step_joint(selected, ratio)
+            done = terminated or truncated
+        rows.append({"seed": float(seed), **env.summary(),
+                     "decision_latency_ms": float(np.mean(decision_times))})
+    aggregate = {key: {"mean": float(np.mean([row[key] for row in rows])),
+                       "std": float(np.std([row[key] for row in rows], ddof=1)) if len(rows) > 1 else 0.0}
+                 for key in rows[0] if key != "seed"}
+    return rows, aggregate
 
 
 class MetricsOnlySAGINEnv(SAGINEnv):

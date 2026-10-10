@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from .models import QNetwork, masked_q_values
+from .models import JointQNetwork, QNetwork, masked_q_values
 from .replay import ReplayBuffer
 
 
@@ -243,30 +243,203 @@ class ReplicaD3QNAgent(D3QNAgent):
         bootstrap_state: np.ndarray | None = None,
         bootstrap_mask: np.ndarray | None = None,
     ) -> list[float]:
-        """Store one task's decisions and bootstrap its outcome into the next task."""
+        """Propagate a task outcome through its replica decisions."""
         if not transitions:
             return []
         if not episode_done and (bootstrap_state is None or bootstrap_mask is None):
             raise ValueError("a continuing episode requires the next task state and action mask")
-        losses: list[float] = []
-        for index, (state, action, next_state, done, next_mask) in enumerate(transitions):
+        losses = []
+        for index, (state, action, successor, _, mask) in enumerate(transitions):
             last = index == len(transitions) - 1
-            reward = float(final_reward) if last else 0.0
-            terminal = bool(episode_done) if last else False
             if last and not episode_done:
-                next_state = bootstrap_state
-                next_mask = bootstrap_mask
-            discount = self.gamma_inter if last else self.gamma_intra
-            loss = self.observe(
-                state,
-                action,
-                reward,
-                0.0,
-                next_state,
-                terminal,
-                next_mask,
-                discount=discount,
-            )
+                successor, mask = bootstrap_state, bootstrap_mask
+            loss = self.observe(state, action, final_reward if last else 0.0, 0.0,
+                                successor, episode_done if last else False, mask,
+                                discount=self.gamma_inter if last else self.gamma_intra)
             if loss is not None:
                 losses.append(loss)
         return losses
+
+
+class JointD3QNAgent:
+    """Autoregressive joint D3QN with one encoder and four action heads."""
+
+    HEADS = ("primary", "replica_count", "replica_node", "resource")
+
+    def __init__(self, env: Any, config: dict[str, Any], seed: int, device: str | torch.device = "cpu", analytic_replicas: bool = False) -> None:
+        train = config["training"]
+        self.state_dim = int(env.joint_state_dim)
+        self.action_dim = int(env.action_dim)
+        self.max_replicas = int(env.env_cfg["max_replicas"])
+        self.analytic_replicas = analytic_replicas
+        self.resource_levels = tuple(float(item) for item in config.get("joint", {}).get("resource_levels", (0.25, 0.5, 0.75, 1.0)))
+        if not self.resource_levels or any(not 0 < level <= 1 for level in self.resource_levels):
+            raise ValueError("joint resource levels must be in (0, 1]")
+        if 1.0 not in self.resource_levels:
+            raise ValueError("joint resource levels must include 1.0")
+        self.device = torch.device(device)
+        self.rng = np.random.default_rng(seed)
+        torch.manual_seed(seed)
+        self.online = JointQNetwork(self.state_dim, self.action_dim, self.max_replicas, len(self.resource_levels), train["hidden_sizes"]).to(self.device)
+        self.target = JointQNetwork(self.state_dim, self.action_dim, self.max_replicas, len(self.resource_levels), train["hidden_sizes"]).to(self.device)
+        self.target.load_state_dict(self.online.state_dict())
+        self.target.eval()
+        self.optimizer = torch.optim.Adam(self.online.parameters(), lr=float(train["learning_rate"]))
+        self.gamma = float(train["gamma"])
+        self.batch_size = int(train["batch_size"])
+        self.target_update_steps = int(train["target_update_steps"])
+        self.gradient_clip = float(train.get("gradient_clip", 10.0))
+        pairs = (("primary", "resource"), ("primary", "replica_count"), ("replica_count", "replica_node"),
+                 ("replica_count", "resource"), ("replica_node", "replica_node"),
+                 ("replica_node", "resource"), ("resource", "primary"))
+        self.buffers = {pair: ReplayBuffer(int(train["replay_capacity"]), seed + i)
+                        for i, pair in enumerate(pairs)}
+        self.lagrange = float(train["lambda_initial"])
+        self.costs: deque[float] = deque(maxlen=int(train["cost_window"]))
+        self.cost_budget = float(train["cost_budget"])
+        self.lagrange_lr = float(train["lagrange_learning_rate"])
+        self.lagrange_update_steps = int(train["lagrange_update_steps"])
+        self.training_steps = 0
+        self.last_q_max = float("nan")
+
+    def _act(self, state: np.ndarray, mask: np.ndarray, head: str, epsilon: float) -> int:
+        available = np.flatnonzero(mask)
+        if len(available) == 0:
+            raise RuntimeError(f"empty action mask for joint head {head}")
+        state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).unsqueeze(0)
+        action_mask = torch.as_tensor(mask, dtype=torch.bool, device=self.device).unsqueeze(0)
+        with torch.no_grad():
+            values = masked_q_values(self.online(state_tensor, head), action_mask)
+            self.last_q_max = float(values.max().item())
+            greedy = int(values.argmax(dim=1).item())
+        return int(self.rng.choice(available)) if self.rng.random() < epsilon else greedy
+
+    def _count_mask(self, env: Any, primary: int) -> np.ndarray:
+        node_mask = self._node_mask(env)
+        feasible = int(node_mask.sum()) - int(node_mask[primary])
+        upper = min(self.max_replicas, 1 + feasible)
+        return np.asarray([count <= upper for count in range(1, self.max_replicas + 1)], dtype=bool)
+
+    def _node_mask(self, env: Any) -> np.ndarray:
+        return np.asarray([item.available and env.joint_resource_mask([item.action], self.resource_levels).any()
+                           for item in env.candidates], dtype=bool)
+
+    def decide(
+        self, env: Any, epsilon: float = 0.0
+    ) -> tuple[int, list[int], float, list[tuple[str, np.ndarray, int, np.ndarray, np.ndarray]]]:
+        transitions: list[tuple[str, np.ndarray, int, np.ndarray, np.ndarray]] = []
+        primary_state = env.joint_observation([], 1)
+        primary_mask = self._node_mask(env)
+        primary = self._act(primary_state, primary_mask, "primary", epsilon)
+        if self.analytic_replicas:
+            selected = [item.action for item in env._replica_plan(env.candidates[primary])
+                        if primary_mask[item.action]]
+            resource_state = env.joint_observation(selected, len(selected))
+            resource_mask = env.joint_resource_mask(selected, self.resource_levels)
+            resource_action = self._act(resource_state, resource_mask, "resource", epsilon)
+            transitions = [("primary", primary_state, primary, resource_state, primary_mask),
+                           ("resource", resource_state, resource_action, resource_state.copy(), resource_mask)]
+            return primary, selected, self.resource_levels[resource_action], transitions
+        count_state = env.joint_observation([primary], 1)
+        count_mask = self._count_mask(env, primary)
+        count_action = self._act(count_state, count_mask, "replica_count", epsilon)
+        target_count = count_action + 1
+        selected = [primary]
+        node_state = env.joint_observation(selected, target_count)
+        transitions.append(("primary", primary_state, primary, count_state, primary_mask))
+        transitions.append(("replica_count", count_state, count_action, node_state, count_mask))
+        while len(selected) < target_count:
+            node_mask = primary_mask.copy()
+            node_mask[selected] = False
+            node_action = self._act(node_state, node_mask, "replica_node", epsilon)
+            selected.append(node_action)
+            next_state = env.joint_observation(selected, target_count)
+            transitions.append(("replica_node", node_state, node_action, next_state, node_mask))
+            node_state = next_state
+        resource_state = env.joint_observation(selected, target_count)
+        resource_mask = env.joint_resource_mask(selected, self.resource_levels)
+        resource_action = self._act(resource_state, resource_mask, "resource", epsilon)
+        transitions.append(("resource", resource_state, resource_action, resource_state.copy(), resource_mask))
+        return primary, selected, self.resource_levels[resource_action], transitions
+
+    def observe_sequence(
+        self,
+        transitions: list[tuple[str, np.ndarray, int, np.ndarray, np.ndarray]],
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        next_mask: np.ndarray,
+        cost: float = 0.0,
+    ) -> list[float]:
+        """Bootstrap into the next head; only the resource step advances task time."""
+        losses: list[float] = []
+        constrained_reward = float(reward - self.lagrange * cost)
+        for index, (head, state, action, successor, mask) in enumerate(transitions):
+            last = index == len(transitions) - 1
+            if last:
+                successor = next_state
+                terminal = done
+                next_head = "primary"
+                successor_mask = next_mask
+            else:
+                terminal = False
+                next_head, successor, _, _, successor_mask = transitions[index + 1]
+            pair = (head, next_head)
+            self.buffers[pair].add(state, action, constrained_reward if last else 0.0,
+                                   successor, terminal, successor_mask, self.gamma if last else 1.0)
+            loss = self._learn_head(pair)
+            if loss is not None:
+                losses.append(loss)
+        self.training_steps += 1
+        self.costs.append(float(cost))
+        if self.training_steps % self.lagrange_update_steps == 0:
+            self.lagrange = max(0.0, self.lagrange + self.lagrange_lr * (float(np.mean(self.costs)) - self.cost_budget))
+        if self.training_steps % self.target_update_steps == 0:
+            self.target.load_state_dict(self.online.state_dict())
+        return losses
+
+    def _learn_head(self, pair: tuple[str, str]) -> float | None:
+        head, next_head = pair
+        buffer = self.buffers[pair]
+        if len(buffer) < self.batch_size:
+            return None
+        batch = buffer.sample(self.batch_size)
+        states = torch.as_tensor(batch.states, device=self.device)
+        actions = torch.as_tensor(batch.actions, device=self.device).unsqueeze(1)
+        rewards = torch.as_tensor(batch.rewards, device=self.device)
+        next_states = torch.as_tensor(batch.next_states, device=self.device)
+        dones = torch.as_tensor(batch.dones, device=self.device)
+        masks = torch.as_tensor(batch.next_masks, dtype=torch.bool, device=self.device)
+        q_values = self.online(states, head).gather(1, actions).squeeze(1)
+        with torch.no_grad():
+            next_actions = masked_q_values(self.online(next_states, next_head), masks).argmax(dim=1, keepdim=True)
+            next_q = self.target(next_states, next_head).gather(1, next_actions).squeeze(1)
+            discounts = torch.as_tensor(batch.discounts, device=self.device)
+            target = rewards + discounts * (1.0 - dones) * next_q
+        loss = nn.functional.smooth_l1_loss(q_values, target)
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        nn.utils.clip_grad_norm_(self.online.parameters(), self.gradient_clip)
+        self.optimizer.step()
+        return float(loss.detach().cpu())
+
+    def save(self, path: str | Path, metadata: dict[str, Any] | None = None) -> None:
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        torch.save({"online": self.online.state_dict(), "target": self.target.state_dict(), "optimizer": self.optimizer.state_dict(), "state_dim": self.state_dim, "action_dim": self.action_dim, "max_replicas": self.max_replicas, "resource_levels": self.resource_levels, "analytic_replicas": self.analytic_replicas, "lagrange": self.lagrange, "training_steps": self.training_steps, "metadata": metadata or {}}, output)
+
+    def load(self, path: str | Path, load_optimizer: bool = False) -> dict[str, Any]:
+        payload = torch.load(path, map_location=self.device, weights_only=False)
+        if int(payload["state_dim"]) != self.state_dim or int(payload["action_dim"]) != self.action_dim:
+            raise ValueError("joint checkpoint dimensions do not match the environment")
+        if tuple(payload["resource_levels"]) != self.resource_levels or int(payload["max_replicas"]) != self.max_replicas:
+            raise ValueError("joint checkpoint action semantics do not match the configuration")
+        if bool(payload.get("analytic_replicas", False)) != self.analytic_replicas:
+            raise ValueError("checkpoint replica policy does not match the method")
+        self.online.load_state_dict(payload["online"])
+        self.target.load_state_dict(payload.get("target", payload["online"]))
+        if load_optimizer and "optimizer" in payload:
+            self.optimizer.load_state_dict(payload["optimizer"])
+        self.lagrange = float(payload.get("lagrange", self.lagrange))
+        self.training_steps = int(payload.get("training_steps", 0))
+        return dict(payload.get("metadata", {}))

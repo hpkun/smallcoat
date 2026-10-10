@@ -14,6 +14,7 @@ from .agent import D3QNAgent, ReplicaD3QNAgent
 from .environment import NTLAction, NTL_NONE, SAGINEnv
 from .hierarchical import HierarchicalAgent
 from .ppo import PPOTransition
+from .redundancy import combined_reliability
 
 
 def seed_everything(seed: int) -> None:
@@ -107,9 +108,12 @@ class LearnedReplicaAgent:
             stop_action = env.action_dim
             if action == stop_action:
                 transitions.append((replica_state, action, replica_state.copy(), True, replica_mask.copy()))
-                self.last_stop_reason = (
-                    "active_stop" if bool(replica_mask[:stop_action].any()) else "no_feasible_candidate_stop"
-                )
+                if bool(replica_mask[:stop_action].any()):
+                    self.last_stop_reason = "active_stop"
+                else:
+                    assert env.current_task is not None
+                    reliable = combined_reliability([env.candidates[item] for item in selected]) >= env.current_task.reliability_required
+                    self.last_stop_reason = "no_feasible_candidate_stop" if reliable else "infeasible"
                 break
             next_selected = selected + [int(action)]
             terminal = len(next_selected) >= max_replicas
@@ -162,11 +166,23 @@ def build_learned_replica_agent(env: SAGINEnv, config: dict[str, Any], seed: int
     if primary_checkpoint:
         primary.load(primary_checkpoint)
     replica = ReplicaD3QNAgent(env.learned_redundancy_state_dim, env.learned_redundancy_action_dim, config, seed + 1, device=device)
+    bc_checkpoint = config.get("learned_replica", {}).get("bc_checkpoint")
+    if bc_checkpoint:
+        metadata = replica.load(bc_checkpoint)
+        if metadata.get("artifact") not in (None, "replica_behavior_cloning"):
+            raise ValueError("learned_replica.bc_checkpoint is not a replica BC checkpoint")
     return LearnedReplicaAgent(primary, replica, seed)
 
 
 def build_hierarchical_agent(env: SAGINEnv, config: dict[str, Any], seed: int, device: str) -> HierarchicalAgent:
     return HierarchicalAgent(env, config, seed, device=device)
+
+
+class MetricsOnlySAGINEnv(SAGINEnv):
+    """Execute the same tasks without collecting optional replica audits."""
+
+    def replica_audit(self, primary: Any, selected: list[Any], stop_reason: str = "not_applicable") -> dict[str, Any]:
+        return {}
 
 
 def train_agent(
@@ -175,9 +191,11 @@ def train_agent(
     seed: int,
     device: str = "cpu",
     progress: bool = True,
+    metrics_only: bool = False,
 ) -> tuple[D3QNAgent, list[dict[str, float]]]:
     seed_everything(seed)
-    env = SAGINEnv(config, seed=seed)
+    env_type = MetricsOnlySAGINEnv if metrics_only else SAGINEnv
+    env = env_type(config, seed=seed)
     agent = build_agent(method, env, config, seed, device)
     train_cfg = config["training"]
     epsilon = float(train_cfg["epsilon_start"])
@@ -222,10 +240,12 @@ def train_agent(
 
 
 def train_learned_replica_agent(
-    config: dict[str, Any], seed: int, device: str = "cpu", progress: bool = True
+    config: dict[str, Any], seed: int, device: str = "cpu", progress: bool = True,
+    metrics_only: bool = False,
 ) -> tuple[LearnedReplicaAgent, list[dict[str, Any]]]:
     seed_everything(seed)
-    env = SAGINEnv(config, seed=seed)
+    env_type = MetricsOnlySAGINEnv if metrics_only else SAGINEnv
+    env = env_type(config, seed=seed)
     agent = build_learned_replica_agent(env, config, seed, device)
     train_cfg = config["training"]
     epsilon = float(train_cfg["epsilon_start"])
@@ -250,6 +270,7 @@ def train_learned_replica_agent(
         active_stops = 0
         max_replica_stops = 0
         no_feasible_candidate_stops = 0
+        infeasible_stops = 0
         done = False
         pending_replica: tuple[list[tuple[np.ndarray, int, np.ndarray, bool, np.ndarray]], float] | None = None
         while not done:
@@ -276,6 +297,7 @@ def train_learned_replica_agent(
             active_stops += int(agent.last_stop_reason == "active_stop")
             max_replica_stops += int(agent.last_stop_reason == "max_replica_stop")
             no_feasible_candidate_stops += int(agent.last_stop_reason == "no_feasible_candidate_stop")
+            infeasible_stops += int(agent.last_stop_reason == "infeasible")
             next_state, reward, terminated, truncated, info = env.step_with_replicas(
                 selected, stop_reason=agent.last_stop_reason
             )
@@ -327,6 +349,7 @@ def train_learned_replica_agent(
                 "active_stop_rate": float(100.0 * active_stops / max(len(env._metrics), 1)),
                 "max_replica_stop_rate": float(100.0 * max_replica_stops / max(len(env._metrics), 1)),
                 "no_feasible_candidate_stop_rate": float(100.0 * no_feasible_candidate_stops / max(len(env._metrics), 1)),
+                "infeasible_stop_rate": float(100.0 * infeasible_stops / max(len(env._metrics), 1)),
                 "forced_stop_rate": float(100.0 * max_replica_stops / max(len(env._metrics), 1)),
                 **summary,
                 **summary_aliases,

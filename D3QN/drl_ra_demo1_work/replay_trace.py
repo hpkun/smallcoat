@@ -14,16 +14,28 @@ import torch
 from audit_replica import AUDIT_FIELDS, aggregate, load_checkpoint, reliability_bucket
 from drl_ra.experiment import build_agent, build_learned_replica_agent, method_options, seed_everything
 from drl_ra.trace import TraceEnv, digest, evaluation_config, input_sequence_digest, load_trace
+from drl_ra.violation_audit import classify_violation, summarize_violations
 
 
 METHODS = ("d3qn", "drl-ra", "drl-ra-learned-replica")
-STOP_FIELDS = ("active_stop", "max_replica_stop", "no_feasible_candidate_stop")
+STOP_FIELDS = ("active_stop", "max_replica_stop", "no_feasible_candidate_stop", "infeasible")
 FAILURE_FIELDS = ("intrinsically_infeasible", "primary_bottleneck", "replica_policy_failure")
 AUDIT_NAMES = {
     "d3qn": "audit_d3qn.json",
     "drl-ra": "audit_drl_ra.json",
     "drl-ra-learned-replica": "audit_learned_replica.json",
 }
+METRICS_ONLY_FIELDS = (
+    "tcr", "cvr", "mean_replicas", "energy_mj", "latency_ms",
+    "reliability_shortfall", "replica_1_pct", "replica_2_pct", "replica_3_pct",
+)
+
+
+class MetricsOnlyTraceEnv(TraceEnv):
+    """Keep normal execution while skipping optional feasibility/reward audits."""
+
+    def replica_audit(self, primary: Any, selected: list[Any], stop_reason: str = "not_applicable") -> dict[str, Any]:
+        return {}
 
 
 def file_digest(path: str | Path) -> str:
@@ -57,11 +69,21 @@ def summarize_records(rows: list[dict[str, Any]], learned: bool) -> dict[str, An
     return result
 
 
-def run_replay(trace: dict[str, Any], checkpoint: str | Path, device: str = "cpu", expected_method: str | None = None, progress: bool = False) -> dict[str, Any]:
+def run_replay(
+    trace: dict[str, Any],
+    checkpoint: str | Path,
+    device: str = "cpu",
+    expected_method: str | None = None,
+    progress: bool = False,
+    metrics_only: bool = False,
+    violation_breakdown: bool = False,
+) -> dict[str, Any]:
     _, metadata = load_checkpoint(str(checkpoint), device)
     method = str(metadata.get("method", ""))
     if method not in METHODS or (expected_method is not None and method != expected_method):
         raise ValueError(f"wrong checkpoint method: expected {expected_method or METHODS}, got {method!r}")
+    if violation_breakdown and (method != "drl-ra-learned-replica" or not metrics_only):
+        raise ValueError("violation breakdown requires learned replica and metrics_only=True")
     training_config = deepcopy(metadata["config"])
     config = evaluation_config(training_config, trace)
     config["environment"]["enable_redundancy"] = method_options(method)["redundancy"]
@@ -72,7 +94,8 @@ def run_replay(trace: dict[str, Any], checkpoint: str | Path, device: str = "cpu
         } for section in ("environment", "reward")
     }
     seed_everything(int(trace["seed"]))
-    env = TraceEnv(config, trace)
+    env_type = MetricsOnlyTraceEnv if metrics_only else TraceEnv
+    env = env_type(config, trace)
     learned = method == "drl-ra-learned-replica"
     policy_seed = int(metadata.get("seed", trace["seed"]))
     policy = (build_learned_replica_agent(env, config, policy_seed, device) if learned
@@ -95,26 +118,39 @@ def run_replay(trace: dict[str, Any], checkpoint: str | Path, device: str = "cpu
                     primary = env.candidates[0]
                 actions = [item.action for item in env._replica_plan(primary)]
                 stop_reason = "not_applicable"
-            selected_reward = env._replica_set_reward([env.candidates[action] for action in actions])
+            if violation_breakdown:
+                violation_row = classify_violation(env.candidates, actions, env.current_task.reliability_required, stop_reason)
+            if not metrics_only:
+                selected_reward = env._replica_set_reward([env.candidates[action] for action in actions])
             if learned:
                 state, reward, terminated, truncated, info = env.step_with_replicas(actions, stop_reason=stop_reason)
             else:
                 state, reward, terminated, truncated, info = env.step(primary_action)
             if info["replica_actions"] != actions:
                 raise RuntimeError(f"executed replicas differ from audited replicas at task {task_id}")
-            row = {key: value for key, value in info.items() if key != "action_mask"}
-            row.update(
-                task_id=task_id, arrival_time_s=entry["arrival_time_s"], task=entry["task"],
-                input_sha256=digest(entry), reward=reward, stop_reason=stop_reason,
-                selected_snapshot_reward=selected_reward,
-                snapshot_reward_regret=max(row[field] for field in ("best_reward_n1", "best_reward_n2", "best_reward_n3") if row[field] is not None) - selected_reward,
-            )
-            if any(field not in row for field in AUDIT_FIELDS):
-                raise RuntimeError("missing Step 2-5 audit fields")
-            if sum(row[field] for field in FAILURE_FIELDS) != row["violation"]:
-                raise RuntimeError("violation causes do not partition reliability violations")
-            if learned and sum(row[field] for field in STOP_FIELDS) != 1:
-                raise RuntimeError("learned replica stop reasons do not partition tasks")
+            if metrics_only:
+                row = {
+                    "task_id": task_id, "input_sha256": digest(entry),
+                    "stop_reason": stop_reason, "infeasible": int(stop_reason == "infeasible"),
+                }
+                if violation_breakdown:
+                    if violation_row["violation"] != info["violation"] or violation_row["reliability"] != info["reliability"]:
+                        raise RuntimeError("violation diagnosis differs from executed replica set")
+                    row.update(violation_row)
+            else:
+                row = {key: value for key, value in info.items() if key != "action_mask"}
+                row.update(
+                    task_id=task_id, arrival_time_s=entry["arrival_time_s"], task=entry["task"],
+                    input_sha256=digest(entry), reward=reward, stop_reason=stop_reason,
+                    selected_snapshot_reward=selected_reward,
+                    snapshot_reward_regret=max(row[field] for field in ("best_reward_n1", "best_reward_n2", "best_reward_n3") if row[field] is not None) - selected_reward,
+                )
+                if any(field not in row for field in AUDIT_FIELDS):
+                    raise RuntimeError("missing Step 2-5 audit fields")
+                if sum(row[field] for field in FAILURE_FIELDS) != row["violation"]:
+                    raise RuntimeError("violation causes do not partition reliability violations")
+                if learned and sum(row[field] for field in STOP_FIELDS) != 1:
+                    raise RuntimeError("learned replica stop reasons do not partition tasks")
             if bool(terminated or truncated) != (task_id == trace["steps"] - 1):
                 raise RuntimeError("trace terminated at the wrong task")
             records.append(row)
@@ -124,6 +160,26 @@ def run_replay(trace: dict[str, Any], checkpoint: str | Path, device: str = "cpu
     actual_sequence = digest([row["input_sha256"] for row in records])
     if actual_sequence != input_sequence_digest(trace["entries"]):
         raise RuntimeError("replay input sequence checksum differs from trace")
+    if metrics_only:
+        summary = env.summary()
+        stop_counts = {field: sum(row["stop_reason"] == field for row in records) for field in STOP_FIELDS}
+        result = {
+            "checkpoint": str(checkpoint), "checkpoint_sha256": file_digest(checkpoint),
+            "method": method, "seed": trace["seed"], "steps": trace["steps"],
+            "trace_sha256": trace["sha256"], "input_sequence_sha256": actual_sequence,
+            "policy_enable_redundancy": config["environment"]["enable_redundancy"],
+            "summary": {field: summary[field] for field in METRICS_ONLY_FIELDS},
+            "stop_reasons": {
+                "applicable": learned,
+                "counts": {field: count if learned else None for field, count in stop_counts.items()},
+                "rates_pct": {field: 100.0 * count / len(records) if learned else None for field, count in stop_counts.items()},
+            },
+            "infeasible_task_ids": [row["task_id"] for row in records if row["infeasible"]],
+            "records": records,
+        }
+        if violation_breakdown:
+            result["violation_breakdown"] = summarize_violations(records)
+        return result
     groups: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in records:
         groups[f"reliability:{reliability_bucket(row['required_reliability'])}"].append(row)
@@ -178,7 +234,7 @@ def comparison_markdown(comparison: dict[str, Any]) -> str:
         counts = audit["reward_optimal_replica_counts"]
         lines.append(f"| {method} | {counts['1']} | {counts['2']} | {counts['3']} | {audit['mean_snapshot_reward_regret']:.6f} |")
     lines += ["", "Reward oracle 沿用现有快照口径：枚举全局可行候选的 1/2/3 副本集合，时延取集合中的最小时延。它不是对成功抽样求期望后的 reward。", "",
-              "| 算法 | 主动 STOP % | 达到副本上限 % | 无可行候选 % |", "|---|---:|---:|---:|"]
+              "| 算法 | 主动 STOP % | 达到副本上限 % | 达标但无候选 % | infeasible % |", "|---|---:|---:|---:|---:|"]
     for method, result in comparison["algorithms"].items():
         stop = result["summary"]["audit"]["stop_reasons"]
         values = [f"{stop['rates_pct'][field]:.2f}" if stop["applicable"] else "不适用" for field in STOP_FIELDS]
@@ -189,8 +245,30 @@ def comparison_markdown(comparison: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def metrics_comparison_markdown(comparison: dict[str, Any]) -> str:
+    labels = {"d3qn": "D3QN", "drl-ra": "DRL-RA", "drl-ra-learned-replica": "V2 (Learned Replica)"}
+    lines = [
+        "# Seed 42 fixed-trace comparison", "",
+        f"All methods used the same {comparison['steps']}-task trace (seed={comparison['seed']}).",
+        f"Per-task inputs verified: {comparison['shared_inputs_verified']}.",
+        f"Trace SHA-256: `{comparison['trace_sha256']}`.",
+        "Reward oracle and Step 2-5 audits were not run.", "",
+        "| Method | TCR (%) | CVR (%) | MeanReplicas | Energy (mJ/task) | Latency (ms) | ReliabilityShortfall | 1 replica (%) | 2 replicas (%) | 3 replicas (%) |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+    ]
+    for method, result in comparison["algorithms"].items():
+        summary = result["summary"]
+        lines.append(
+            f"| {labels[method]} | {summary['tcr']:.2f} | {summary['cvr']:.2f} | "
+            f"{summary['mean_replicas']:.3f} | {summary['energy_mj']:.3f} | "
+            f"{summary['latency_ms']:.3f} | {summary['reliability_shortfall']:.6f} | "
+            f"{summary['replica_1_pct']:.2f} | {summary['replica_2_pct']:.2f} | {summary['replica_3_pct']:.2f} |"
+        )
+    return "\n".join(lines)
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Replay all three algorithms on one saved trace and audit Steps 2-5.")
+    parser = argparse.ArgumentParser(description="Replay all three algorithms on one saved trace.")
     parser.add_argument("--trace", required=True)
     parser.add_argument("--d3qn-checkpoint", default="outputs/screen_seed42/d3qn_seed42/model.pt")
     parser.add_argument("--drl-ra-checkpoint", default="outputs/screen_seed42/drl-ra_seed42/model.pt")
@@ -198,6 +276,7 @@ def main() -> None:
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--torch-threads", type=int, default=1)
     parser.add_argument("--output-dir", help="Defaults to outputs/fixed_trace_seed{trace seed}")
+    parser.add_argument("--metrics-only", action="store_true", help="Skip feasibility and reward-oracle audits.")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     if args.torch_threads < 1:
@@ -205,7 +284,8 @@ def main() -> None:
     torch.set_num_threads(args.torch_threads)
     trace = load_trace(args.trace)
     output = Path(args.output_dir or f"outputs/fixed_trace_seed{trace['seed']}")
-    filenames = [*AUDIT_NAMES.values(), "comparison.json", "comparison.md", "behavior_diagnostics.json"]
+    filenames = (["metrics_comparison.json", "metrics_comparison.md"] if args.metrics_only else
+                 [*AUDIT_NAMES.values(), "comparison.json", "comparison.md", "behavior_diagnostics.json"])
     for name in filenames:
         if (output / name).exists() and not args.overwrite:
             raise FileExistsError(f"{output / name} exists; choose another output directory or --overwrite")
@@ -216,12 +296,14 @@ def main() -> None:
         if metadata.get("method") != method:
             raise ValueError(f"{checkpoint}: expected method {method}")
         evaluation_config(metadata["config"], trace)
-    results = [run_replay(trace, checkpoint, args.device, method, progress=True) for method, checkpoint in zip(METHODS, checkpoints)]
+    results = [run_replay(trace, checkpoint, args.device, method, progress=True, metrics_only=args.metrics_only)
+               for method, checkpoint in zip(METHODS, checkpoints)]
     verify_shared_inputs(results, trace)
     comparison = {
         "trace": str(Path(args.trace)), "trace_sha256": trace["sha256"],
         "input_sequence_sha256": input_sequence_digest(trace["entries"]),
         "seed": trace["seed"], "steps": trace["steps"], "shared_inputs_verified": True,
+        "metrics_only": args.metrics_only,
         "algorithms": {result["method"]: {key: value for key, value in result.items() if key != "records"} for result in results},
     }
     output.mkdir(parents=True, exist_ok=True)
@@ -230,19 +312,25 @@ def main() -> None:
         with (output / name).open("w" if args.overwrite else "x", encoding="utf-8") as stream:
             json.dump(value, stream, ensure_ascii=False, indent=2, allow_nan=False)
 
-    for result in results:
-        write_json(AUDIT_NAMES[result["method"]], result)
-    write_json("comparison.json", comparison)
-    learned = results[-1]
-    stop_rates = learned["summary"]["audit"]["stop_reasons"]["rates_pct"]
-    write_json("behavior_diagnostics.json", {
-        **{key: value for key, value in learned.items() if key != "records"},
-        "active_stop_rate": stop_rates["active_stop"],
-        "max_replica_stop_rate": stop_rates["max_replica_stop"],
-        "no_feasible_candidate_stop_rate": stop_rates["no_feasible_candidate_stop"],
-    })
-    with (output / "comparison.md").open("w" if args.overwrite else "x", encoding="utf-8") as stream:
-        stream.write(comparison_markdown(comparison))
+    if args.metrics_only:
+        write_json("metrics_comparison.json", comparison)
+        with (output / "metrics_comparison.md").open("w" if args.overwrite else "x", encoding="utf-8") as stream:
+            stream.write(metrics_comparison_markdown(comparison))
+    else:
+        for result in results:
+            write_json(AUDIT_NAMES[result["method"]], result)
+        write_json("comparison.json", comparison)
+        learned = results[-1]
+        stop_rates = learned["summary"]["audit"]["stop_reasons"]["rates_pct"]
+        write_json("behavior_diagnostics.json", {
+            **{key: value for key, value in learned.items() if key != "records"},
+            "active_stop_rate": stop_rates["active_stop"],
+            "max_replica_stop_rate": stop_rates["max_replica_stop"],
+            "no_feasible_candidate_stop_rate": stop_rates["no_feasible_candidate_stop"],
+            "infeasible_stop_rate": stop_rates["infeasible"],
+        })
+        with (output / "comparison.md").open("w" if args.overwrite else "x", encoding="utf-8") as stream:
+            stream.write(comparison_markdown(comparison))
     print(json.dumps({
         "output_dir": str(output), "shared_inputs_verified": True,
         "summary": {result["method"]: result["summary"] for result in results},

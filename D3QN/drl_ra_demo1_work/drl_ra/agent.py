@@ -180,6 +180,60 @@ class ReplicaD3QNAgent(D3QNAgent):
         self.gamma = self.gamma_intra
         self.lagrange = 0.0
 
+    def behavior_clone(
+        self,
+        states: np.ndarray,
+        action_masks: np.ndarray,
+        teacher_actions: np.ndarray,
+        epochs: int,
+        batch_size: int | None = None,
+    ) -> list[float]:
+        """Pretrain only the replica online network on masked teacher actions."""
+        states = np.asarray(states, dtype=np.float32)
+        action_masks = np.asarray(action_masks, dtype=bool)
+        teacher_actions = np.asarray(teacher_actions, dtype=np.int64)
+        if states.ndim != 2 or states.shape[1] != self.state_dim:
+            raise ValueError("BC states have the wrong shape")
+        if action_masks.shape != (len(states), self.action_dim):
+            raise ValueError("BC action masks have the wrong shape")
+        if teacher_actions.shape != (len(states),):
+            raise ValueError("BC teacher actions have the wrong shape")
+        if len(states) == 0:
+            raise ValueError("BC dataset is empty")
+        if np.any(teacher_actions < 0) or np.any(teacher_actions >= self.action_dim):
+            raise ValueError("BC teacher action is out of range")
+        if not np.all(action_masks[np.arange(len(states)), teacher_actions]):
+            raise ValueError("BC teacher action is masked out")
+        if epochs < 1:
+            raise ValueError("BC epochs must be positive")
+        batch_size = int(batch_size or self.batch_size)
+        if batch_size < 1:
+            raise ValueError("BC batch size must be positive")
+
+        self.online.train()
+        losses: list[float] = []
+        indices = np.arange(len(states))
+        for _ in range(int(epochs)):
+            self.rng.shuffle(indices)
+            epoch_losses: list[float] = []
+            for start in range(0, len(indices), batch_size):
+                batch = indices[start : start + batch_size]
+                state_tensor = torch.as_tensor(states[batch], dtype=torch.float32, device=self.device)
+                mask_tensor = torch.as_tensor(action_masks[batch], dtype=torch.bool, device=self.device)
+                action_tensor = torch.as_tensor(teacher_actions[batch], dtype=torch.long, device=self.device)
+                q = self.online(state_tensor)
+                q = q.masked_fill(~mask_tensor, -1e9)
+                loss = nn.functional.cross_entropy(q, action_tensor)
+                self.optimizer.zero_grad(set_to_none=True)
+                loss.backward()
+                nn.utils.clip_grad_norm_(self.online.parameters(), self.gradient_clip)
+                self.optimizer.step()
+                epoch_losses.append(float(loss.detach().cpu()))
+            losses.append(float(np.mean(epoch_losses)))
+        self.target.load_state_dict(self.online.state_dict())
+        self.online.eval()
+        return losses
+
     def observe_sequence(
         self,
         transitions: list[tuple[np.ndarray, int, np.ndarray, bool, np.ndarray]],

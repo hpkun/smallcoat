@@ -37,6 +37,7 @@ AUDIT_FIELDS = (
     "active_stop",
     "max_replica_stop",
     "no_feasible_candidate_stop",
+    "infeasible",
     "capacity_block",
     "visibility_block",
     "battery_block",

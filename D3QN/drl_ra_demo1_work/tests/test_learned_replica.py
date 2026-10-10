@@ -1,13 +1,17 @@
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 import numpy as np
+import torch
 
 from drl_ra.config import load_config
 from drl_ra.environment import SAGINEnv
-from drl_ra.experiment import build_learned_replica_agent, train_learned_replica_agent
+from drl_ra.experiment import MetricsOnlySAGINEnv, build_learned_replica_agent, train_learned_replica_agent
+from drl_ra.redundancy import combined_reliability
 
 
 def tiny_config() -> dict:
@@ -19,6 +23,15 @@ def tiny_config() -> dict:
 
 
 class LearnedReplicaTests(unittest.TestCase):
+    def fixed_snapshot(self, required=0.95, available=3, reliability=0.8, env_type=SAGINEnv):
+        env = env_type(tiny_config(), seed=21)
+        env.current_task = replace(env.current_task, reliability_required=required)
+        env._last_candidates = [
+            replace(item, available=item.action < available, reliability=reliability)
+            for item in env.candidates
+        ]
+        return env
+
     def test_state_and_action_dimensions(self):
         env = SAGINEnv(tiny_config(), seed=21)
         env.reset(seed=21)
@@ -27,7 +40,86 @@ class LearnedReplicaTests(unittest.TestCase):
         self.assertEqual(state.shape, (132,))
         self.assertEqual(mask.shape, (21,))
         self.assertFalse(mask[0])
-        self.assertTrue(mask[20])
+        selected_reliability = combined_reliability([env.candidates[0]])
+        self.assertEqual(bool(mask[20]), selected_reliability >= env.current_task.reliability_required or not mask[:20].any())
+
+    def test_stop_is_masked_below_requirement_when_backup_exists(self):
+        env = self.fixed_snapshot()
+        mask = env.learned_redundancy_action_mask([0])
+        self.assertFalse(mask[-1])
+        self.assertEqual(np.flatnonzero(mask).tolist(), [1, 2])
+
+    def test_stop_and_backup_remain_valid_once_requirement_is_met(self):
+        env = self.fixed_snapshot()
+        mask = env.learned_redundancy_action_mask([0, 1])
+        self.assertEqual(np.flatnonzero(mask).tolist(), [2, env.action_dim])
+
+    def test_stop_is_valid_at_exact_reliability_boundary(self):
+        env = self.fixed_snapshot(required=0.8)
+        self.assertTrue(env.learned_redundancy_action_mask([0])[-1])
+
+    def test_stop_is_only_action_without_backup_even_below_requirement(self):
+        env = self.fixed_snapshot(available=1)
+        self.assertEqual(np.flatnonzero(env.learned_redundancy_action_mask([0])).tolist(), [env.action_dim])
+
+    def test_greedy_and_exploratory_policies_cannot_stop_unreliably(self):
+        for epsilon in (0.0, 1.0):
+            env = self.fixed_snapshot()
+            agent = build_learned_replica_agent(env, env.config, seed=21, device="cpu")
+            q_values = torch.zeros(1, env.learned_redundancy_action_dim)
+            q_values[0, env.action_dim] = 1000.0
+            with patch.object(agent.primary, "act", return_value=0), \
+                 patch.object(agent.replica.online, "forward", return_value=q_values):
+                _, selected, transitions = agent.decide(env, replica_epsilon=epsilon)
+            self.assertGreaterEqual(len(selected), 2)
+            self.assertNotEqual(transitions[0][1], env.action_dim)
+            self.assertGreaterEqual(combined_reliability([env.candidates[item] for item in selected]), 0.95)
+            if epsilon == 0.0:
+                self.assertEqual(len(selected), 2)
+                self.assertEqual(agent.last_stop_reason, "active_stop")
+
+    def test_reliable_policy_can_choose_third_replica(self):
+        env = self.fixed_snapshot()
+        agent = build_learned_replica_agent(env, env.config, seed=21, device="cpu")
+        q_values = torch.ones(1, env.learned_redundancy_action_dim)
+        q_values[0, env.action_dim] = -1000.0
+        with patch.object(agent.primary, "act", return_value=0), \
+             patch.object(agent.replica.online, "forward", return_value=q_values):
+            _, selected, _ = agent.decide(env)
+        self.assertEqual(selected, [0, 1, 2])
+        self.assertEqual(agent.last_stop_reason, "max_replica_stop")
+
+    def test_replica_cap_submits_without_an_extra_stop_decision(self):
+        env = self.fixed_snapshot(required=0.999)
+        agent = build_learned_replica_agent(env, env.config, seed=21, device="cpu")
+        with patch.object(agent.primary, "act", return_value=0), \
+             patch.object(agent.replica, "act", wraps=agent.replica.act) as replica_act:
+            _, selected, transitions = agent.decide(env)
+        self.assertEqual(len(selected), 3)
+        self.assertEqual(replica_act.call_count, 2)
+        self.assertTrue(transitions[-1][3])
+        self.assertEqual(agent.last_stop_reason, "max_replica_stop")
+
+    def test_no_backup_stop_records_infeasible_even_without_audits(self):
+        for env_type in (SAGINEnv, MetricsOnlySAGINEnv):
+            env = self.fixed_snapshot(available=1, env_type=env_type)
+            agent = build_learned_replica_agent(env, env.config, seed=21, device="cpu")
+            _, selected, transitions = agent.decide(env)
+            self.assertEqual(selected, [0])
+            self.assertEqual(agent.last_stop_reason, "infeasible")
+            self.assertEqual(transitions[-1][1], env.action_dim)
+            _, _, _, _, info = env.step_with_replicas(selected, stop_reason=agent.last_stop_reason)
+            self.assertEqual(info["stop_reason"], "infeasible")
+            self.assertEqual(info["infeasible"], 1)
+            self.assertEqual(env.metrics[-1]["infeasible"], 1)
+
+    def test_no_backup_after_requirement_is_met_is_not_infeasible(self):
+        env = self.fixed_snapshot(required=0.8, available=1)
+        agent = build_learned_replica_agent(env, env.config, seed=21, device="cpu")
+        _, selected, _ = agent.decide(env)
+        self.assertEqual(agent.last_stop_reason, "no_feasible_candidate_stop")
+        _, _, _, _, info = env.step_with_replicas(selected, stop_reason=agent.last_stop_reason)
+        self.assertEqual(info["infeasible"], 0)
 
     def test_selected_and_unavailable_actions_are_masked(self):
         env = SAGINEnv(tiny_config(), seed=22)

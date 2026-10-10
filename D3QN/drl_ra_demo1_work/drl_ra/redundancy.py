@@ -67,8 +67,9 @@ def redundancy_action_mask(
     candidates: Sequence[ReplicaCandidate],
     selected_actions: Sequence[int],
     max_replicas: int,
+    required_reliability: float,
 ) -> np.ndarray:
-    """Return one action per candidate plus an always-valid STOP action."""
+    """Allow STOP when reliable, at the replica cap, or out of backups."""
     stop_action = len(candidates)
     mask = np.zeros(stop_action + 1, dtype=bool)
     if len(selected_actions) < int(max_replicas):
@@ -76,5 +77,9 @@ def redundancy_action_mask(
             [item.available for item in candidates], dtype=bool
         )
         mask[np.asarray(selected_actions, dtype=np.int64)] = False
-    mask[stop_action] = True
+    selected = [candidates[int(action)] for action in selected_actions]
+    mask[stop_action] = (
+        combined_reliability(selected) >= float(required_reliability)
+        or not bool(mask[:stop_action].any())
+    )
     return mask

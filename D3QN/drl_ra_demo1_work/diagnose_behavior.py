@@ -42,7 +42,7 @@ def main() -> None:
     env.reset(seed=args.seed)
 
     groups: dict[str, list[dict[str, float]]] = defaultdict(list)
-    active_stops = max_replica_stops = no_feasible_candidate_stops = 0
+    active_stops = max_replica_stops = no_feasible_candidate_stops = infeasible_stops = 0
     while env.step_count < args.steps:
         required = float(env.current_task.reliability_required)
         kind = str(env.current_task.kind)
@@ -50,6 +50,7 @@ def main() -> None:
         active_stops += int(agent.last_stop_reason == "active_stop")
         max_replica_stops += int(agent.last_stop_reason == "max_replica_stop")
         no_feasible_candidate_stops += int(agent.last_stop_reason == "no_feasible_candidate_stop")
+        infeasible_stops += int(agent.last_stop_reason == "infeasible")
         _, _, terminated, truncated, info = env.step_with_replicas(
             selected, stop_reason=agent.last_stop_reason
         )
@@ -63,6 +64,7 @@ def main() -> None:
             "intrinsically_infeasible": float(info["intrinsically_infeasible"]),
             "primary_bottleneck": float(info["primary_bottleneck"]),
             "replica_policy_failure": float(info["replica_policy_failure"]),
+            "infeasible": float(info["infeasible"]),
         }
         groups[f"reliability:{bucket(required)}"].append(row)
         groups[f"task_kind:{kind}"].append(row)
@@ -78,6 +80,7 @@ def main() -> None:
             "mean_reliability": sum(row["reliability"] for row in rows) / count,
             "reliability_shortfall": sum(row["reliability_shortfall"] for row in rows) / count,
             "reliability_excess": sum(row["reliability_excess"] for row in rows) / count,
+            "infeasible_stop_rate": 100.0 * sum(row["infeasible"] for row in rows) / count,
         }
 
     result = {
@@ -87,6 +90,7 @@ def main() -> None:
         "active_stop_rate": 100.0 * active_stops / max(env.step_count, 1),
         "max_replica_stop_rate": 100.0 * max_replica_stops / max(env.step_count, 1),
         "no_feasible_candidate_stop_rate": 100.0 * no_feasible_candidate_stops / max(env.step_count, 1),
+        "infeasible_stop_rate": 100.0 * infeasible_stops / max(env.step_count, 1),
         "groups": {name: aggregate(rows) for name, rows in sorted(groups.items())},
         "summary": env.summary(),
     }

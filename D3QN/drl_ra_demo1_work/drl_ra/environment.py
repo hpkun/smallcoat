@@ -349,10 +349,12 @@ class SAGINEnv:
         return state
 
     def learned_redundancy_action_mask(self, selected_actions: list[int]) -> np.ndarray:
+        assert self.current_task is not None
         return redundancy_action_mask(
             self._last_candidates,
             selected_actions,
             int(self.env_cfg["max_replicas"]),
+            self.current_task.reliability_required,
         )
 
     def _capacity_ratio(self, candidate: Candidate) -> float:
@@ -683,6 +685,7 @@ class SAGINEnv:
             "active_stop": int(stop_reason == "active_stop"),
             "max_replica_stop": int(stop_reason == "max_replica_stop"),
             "no_feasible_candidate_stop": int(stop_reason == "no_feasible_candidate_stop"),
+            "infeasible": int(stop_reason == "infeasible"),
             "capacity_block": capacity_block,
             "visibility_block": visibility_block,
             "battery_block": battery_block,
@@ -864,7 +867,11 @@ class SAGINEnv:
             replicas[0],
             invalid=False,
             raw_action=actions[0],
-            audit=self.replica_audit(replicas[0], replicas, stop_reason),
+            audit={
+                **self.replica_audit(replicas[0], replicas, stop_reason),
+                "stop_reason": stop_reason,
+                "infeasible": int(stop_reason == "infeasible"),
+            },
         )
 
     def step_hierarchical(

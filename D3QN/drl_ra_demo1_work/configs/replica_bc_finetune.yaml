@@ -1,3 +1,4 @@
+# BC Replica RL fine-tuning with a fixed greedy DRL-RA primary.
 seed: 42
 environment:
   area_km: 10.0
@@ -20,7 +21,7 @@ environment:
   capacity_gating: true
   sample_reliability_failures: true
 training:
-  episodes: 1000
+  episodes: 100
   evaluation_steps: 10000
   learning_rate: 0.0001
   lagrange_learning_rate: 0.01
@@ -31,9 +32,10 @@ training:
   lagrange_update_steps: 100
   cost_window: 100
   cost_budget: 0.03
-  epsilon_start: 1.0
-  epsilon_end: 0.01
-  epsilon_decay: 0.995
+  # Both must be zero: epsilon_end is applied after every episode.
+  epsilon_start: 0.0
+  epsilon_end: 0.0
+  epsilon_decay: 0.98
   hidden_sizes: [256, 128, 64]
   lambda_initial: 1.0
   gradient_clip: 10.0
@@ -41,14 +43,16 @@ learned_replica:
   gamma_intra: 1.0
   gamma_inter: 0.99
   replica_energy_scale_mj: 2000.0
-  primary_checkpoint: null
-  bc_checkpoint: null
-  freeze_primary_episodes: 0
-  epsilon_start: 1.0
+  primary_checkpoint: outputs/seed42_500ep_fixed2000_20261007/drl-ra_seed42/model.pt
+  bc_checkpoint: outputs/replica_bc_seed42/model.pt
+  # Covers all 100 episodes; the existing trainer skips primary.observe,
+  # so primary online/target weights and its Lagrange multiplier stay fixed.
+  freeze_primary_episodes: 100
+  epsilon_start: 0.05
   epsilon_end: 0.01
-  epsilon_decay: 0.995
+  epsilon_decay: 0.98
   training:
-    learning_rate: 0.0001
+    learning_rate: 0.00001
     replay_capacity: 100000
     batch_size: 64
     target_update_steps: 500

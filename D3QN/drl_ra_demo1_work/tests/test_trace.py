@@ -10,9 +10,9 @@ import torch
 
 from drl_ra.config import load_config
 from drl_ra.environment import SAGINEnv
-from drl_ra.experiment import build_agent, build_learned_replica_agent, method_options
+from drl_ra.experiment import build_agent, build_learned_replica_agent, method_options, train_agent, train_learned_replica_agent
 from drl_ra.trace import TraceEnv, evaluation_config, generate_trace, load_trace, save_trace, trace_digest, validate_trace
-from replay_trace import METHODS, STOP_FIELDS, run_replay, verify_shared_inputs
+from replay_trace import METHODS, METRICS_ONLY_FIELDS, STOP_FIELDS, run_replay, verify_shared_inputs
 
 
 def tiny_config():
@@ -166,6 +166,52 @@ class TraceTests(unittest.TestCase):
                     self.assertTrue(all(row["replicas"] == 1 for row in result["records"]))
                 results.append(result)
         verify_shared_inputs(results, self.trace)
+
+    def test_metrics_only_replay_skips_oracle_and_preserves_results(self):
+        torch.set_num_threads(1)
+        results = []
+        with TemporaryDirectory() as directory:
+            for method in METHODS:
+                config = deepcopy(self.config)
+                env = SAGINEnv(config, seed=1)
+                policy = (build_learned_replica_agent(env, config, 1, "cpu") if method == "drl-ra-learned-replica"
+                          else build_agent(method, env, config, 1, "cpu"))
+                path = Path(directory) / f"{method}.pt"
+                policy.save(path, metadata={"method": method, "seed": 1, "config": config})
+                audited = run_replay(self.trace, path, expected_method=method)
+                with patch.object(SAGINEnv, "replica_audit", side_effect=AssertionError("unexpected audit")), \
+                     patch.object(SAGINEnv, "_replica_set_reward", side_effect=AssertionError("unexpected reward oracle")):
+                    result = run_replay(self.trace, path, expected_method=method, metrics_only=True,
+                                        violation_breakdown=method == "drl-ra-learned-replica")
+                self.assertEqual(set(result["summary"]), set(METRICS_ONLY_FIELDS))
+                self.assertEqual(result["summary"], {key: audited["summary"][key] for key in METRICS_ONLY_FIELDS})
+                self.assertEqual(len(result["records"]), self.trace["steps"])
+                if method == "drl-ra-learned-replica":
+                    self.assertEqual(result["violation_breakdown"]["violation_tasks"], sum(row["violation"] for row in audited["records"]))
+                    self.assertAlmostEqual(result["violation_breakdown"]["cvr_pct"], result["summary"]["cvr"])
+                    self.assertEqual(sum(result["stop_reasons"]["counts"].values()), self.trace["steps"])
+                    self.assertEqual(result["infeasible_task_ids"], [row["task_id"] for row in audited["records"] if row["infeasible"]])
+                    self.assertEqual([row["stop_reason"] for row in result["records"]], [row["stop_reason"] for row in audited["records"]])
+                results.append(result)
+        verify_shared_inputs(results, self.trace)
+
+    def test_metrics_only_training_skips_oracle_for_all_three_methods(self):
+        torch.set_num_threads(1)
+        with patch.object(SAGINEnv, "replica_audit", side_effect=AssertionError("unexpected audit")), \
+             patch.object(SAGINEnv, "_replica_set_reward", side_effect=AssertionError("unexpected reward oracle")):
+            for method in METHODS:
+                config = deepcopy(self.config)
+                config["training"]["episodes"] = 1
+                config["environment"]["episode_steps"] = 2
+                config["training"]["batch_size"] = 2
+                config["learned_replica"]["training"]["batch_size"] = 2
+                if method == "drl-ra-learned-replica":
+                    _, history = train_learned_replica_agent(config, 42, progress=False, metrics_only=True)
+                else:
+                    _, history = train_agent(config, method, 42, progress=False, metrics_only=True)
+                self.assertEqual(len(history), 1)
+                self.assertEqual(history[0]["tasks"], 2.0)
+                self.assertTrue(all(key in history[0] for key in METRICS_ONLY_FIELDS))
 
 
 if __name__ == "__main__":

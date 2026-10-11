@@ -45,7 +45,7 @@ def main() -> None:
             config = deepcopy(metadata["config"])
         config = apply_overrides(config, args.set)
         probe = SAGINEnv(config, seed=args.seeds[0])
-        if method in ("joint-d3qn", "drl-ra-resource"):
+        if method in ("joint-d3qn", "joint-d3qn-bc", "drl-ra-resource"):
             joint_agent = build_joint_agent(probe, config, int(metadata.get("seed", 0)), args.device, analytic_replicas=method == "drl-ra-resource")
             joint_agent.load(args.checkpoint)
         elif method == "d3qn-ppo":

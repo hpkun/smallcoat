@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from .models import JointQNetwork, QNetwork, masked_q_values
-from .replay import ReplayBuffer
+from .replay import BehaviorCloningBuffer, ReplayBuffer
 
 
 class D3QNAgent:
@@ -266,12 +266,13 @@ class JointD3QNAgent:
 
     HEADS = ("primary", "replica_count", "replica_node", "resource")
 
-    def __init__(self, env: Any, config: dict[str, Any], seed: int, device: str | torch.device = "cpu", analytic_replicas: bool = False) -> None:
+    def __init__(self, env: Any, config: dict[str, Any], seed: int, device: str | torch.device = "cpu", analytic_replicas: bool = False, behavior_cloning: bool = False) -> None:
         train = config["training"]
         self.state_dim = int(env.joint_state_dim)
         self.action_dim = int(env.action_dim)
         self.max_replicas = int(env.env_cfg["max_replicas"])
         self.analytic_replicas = analytic_replicas
+        self.behavior_cloning = behavior_cloning
         self.resource_levels = tuple(float(item) for item in config.get("joint", {}).get("resource_levels", (0.25, 0.5, 0.75, 1.0)))
         if not self.resource_levels or any(not 0 < level <= 1 for level in self.resource_levels):
             raise ValueError("joint resource levels must be in (0, 1]")
@@ -301,6 +302,73 @@ class JointD3QNAgent:
         self.lagrange_update_steps = int(train["lagrange_update_steps"])
         self.training_steps = 0
         self.last_q_max = float("nan")
+        self.last_sequence_stats: list[dict[str, float | str]] = []
+        self.bc_skipped_labels = 0
+        bc_cfg = config.get("joint_bc", {})
+        self.bc_batch_size = int(bc_cfg.get("batch_size", self.batch_size))
+        self.bc_initial_weight = float(bc_cfg.get("initial_weight", 0.5))
+        self.bc_final_weight = float(bc_cfg.get("final_weight", 0.0))
+        self.bc_decay_fraction = float(bc_cfg.get("decay_fraction", 0.6))
+        self.bc_temperature = float(bc_cfg.get("temperature", 1.0))
+        self.bc_total_steps = max(1, int(train["episodes"]) * int(env.env_cfg["episode_steps"]))
+        if self.behavior_cloning:
+            if not 0 < self.bc_decay_fraction <= 1:
+                raise ValueError("joint_bc.decay_fraction must be in (0, 1]")
+            if self.bc_initial_weight < 0 or self.bc_final_weight < 0:
+                raise ValueError("joint_bc weights must be non-negative")
+            if self.bc_temperature <= 0:
+                raise ValueError("joint_bc.temperature must be positive")
+        configured_weights = bc_cfg.get("head_weights", {})
+        self.bc_head_weights = {head: float(configured_weights.get(head, 0.0)) for head in self.HEADS}
+        capacity = int(bc_cfg.get("replay_capacity", train["replay_capacity"]))
+        self.bc_buffers = {
+            head: BehaviorCloningBuffer(capacity, seed + 100 + index)
+            for index, head in enumerate(self.HEADS)
+            if self.behavior_cloning and self.bc_head_weights[head] > 0
+        }
+
+    def bc_weight(self) -> float:
+        if not self.behavior_cloning:
+            return 0.0
+        progress = min(self.training_steps / max(self.bc_total_steps * self.bc_decay_fraction, 1.0), 1.0)
+        cosine = 0.5 * (1.0 + np.cos(np.pi * progress))
+        return float(self.bc_final_weight + (self.bc_initial_weight - self.bc_final_weight) * cosine)
+
+    def add_teacher_labels(
+        self,
+        transitions: list[tuple[str, np.ndarray, int, np.ndarray, np.ndarray]],
+        teacher_primary: int,
+        teacher_replicas: list[int],
+    ) -> None:
+        """Label states visited by Joint-D3QN without changing its actions."""
+        if not self.behavior_cloning:
+            return
+        selected: list[int] = []
+        teacher_set = set(int(action) for action in teacher_replicas)
+        for head, state, action, _, action_mask in transitions:
+            targets = np.zeros_like(action_mask, dtype=bool)
+            if head == "primary":
+                if 0 <= teacher_primary < len(targets):
+                    targets[teacher_primary] = True
+                selected = [int(action)]
+            elif head == "replica_count":
+                teacher_count = len(teacher_replicas)
+                if 1 <= teacher_count <= len(targets):
+                    targets[teacher_count - 1] = True
+            elif head == "replica_node":
+                for candidate in teacher_set.difference(selected):
+                    if 0 <= candidate < len(targets):
+                        targets[candidate] = True
+                selected.append(int(action))
+            else:
+                continue
+            buffer = self.bc_buffers.get(head)
+            if buffer is None:
+                continue
+            if (targets & action_mask).any():
+                buffer.add(state, action_mask, targets)
+            else:
+                self.bc_skipped_labels += 1
 
     def _act(self, state: np.ndarray, mask: np.ndarray, head: str, epsilon: float) -> int:
         available = np.flatnonzero(mask)
@@ -373,6 +441,7 @@ class JointD3QNAgent:
     ) -> list[float]:
         """Bootstrap into the next head; only the resource step advances task time."""
         losses: list[float] = []
+        self.last_sequence_stats = []
         constrained_reward = float(reward - self.lagrange * cost)
         for index, (head, state, action, successor, mask) in enumerate(transitions):
             last = index == len(transitions) - 1
@@ -416,17 +485,42 @@ class JointD3QNAgent:
             next_q = self.target(next_states, next_head).gather(1, next_actions).squeeze(1)
             discounts = torch.as_tensor(batch.discounts, device=self.device)
             target = rewards + discounts * (1.0 - dones) * next_q
-        loss = nn.functional.smooth_l1_loss(q_values, target)
+        td_loss = nn.functional.smooth_l1_loss(q_values, target)
+        bc_loss = torch.zeros((), device=self.device)
+        agreement = float("nan")
+        bc_buffer = self.bc_buffers.get(head)
+        weight = self.bc_weight()
+        if bc_buffer is not None and len(bc_buffer) >= self.bc_batch_size and weight > 0:
+            bc_batch = bc_buffer.sample(self.bc_batch_size)
+            bc_states = torch.as_tensor(bc_batch.states, device=self.device)
+            action_masks = torch.as_tensor(bc_batch.action_masks, dtype=torch.bool, device=self.device)
+            target_masks = torch.as_tensor(bc_batch.target_masks, dtype=torch.bool, device=self.device)
+            logits = self.online(bc_states, head) / self.bc_temperature
+            masked_logits = masked_q_values(logits, action_masks)
+            target_logits = masked_q_values(logits, target_masks)
+            bc_loss = -(torch.logsumexp(target_logits, dim=1) - torch.logsumexp(masked_logits, dim=1)).mean()
+            greedy = masked_logits.argmax(dim=1, keepdim=True)
+            agreement = float(target_masks.gather(1, greedy).float().mean().detach().cpu())
+        weighted_bc = weight * self.bc_head_weights.get(head, 0.0) * bc_loss
+        loss = td_loss + weighted_bc
         self.optimizer.zero_grad(set_to_none=True)
         loss.backward()
         nn.utils.clip_grad_norm_(self.online.parameters(), self.gradient_clip)
         self.optimizer.step()
+        self.last_sequence_stats.append({
+            "head": head,
+            "td_loss": float(td_loss.detach().cpu()),
+            "bc_loss": float(bc_loss.detach().cpu()),
+            "total_loss": float(loss.detach().cpu()),
+            "bc_weight": weight,
+            "teacher_agreement": agreement,
+        })
         return float(loss.detach().cpu())
 
     def save(self, path: str | Path, metadata: dict[str, Any] | None = None) -> None:
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)
-        torch.save({"online": self.online.state_dict(), "target": self.target.state_dict(), "optimizer": self.optimizer.state_dict(), "state_dim": self.state_dim, "action_dim": self.action_dim, "max_replicas": self.max_replicas, "resource_levels": self.resource_levels, "analytic_replicas": self.analytic_replicas, "lagrange": self.lagrange, "training_steps": self.training_steps, "metadata": metadata or {}}, output)
+        torch.save({"online": self.online.state_dict(), "target": self.target.state_dict(), "optimizer": self.optimizer.state_dict(), "state_dim": self.state_dim, "action_dim": self.action_dim, "max_replicas": self.max_replicas, "resource_levels": self.resource_levels, "analytic_replicas": self.analytic_replicas, "behavior_cloning": self.behavior_cloning, "lagrange": self.lagrange, "training_steps": self.training_steps, "metadata": metadata or {}}, output)
 
     def load(self, path: str | Path, load_optimizer: bool = False) -> dict[str, Any]:
         payload = torch.load(path, map_location=self.device, weights_only=False)

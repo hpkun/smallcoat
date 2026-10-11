@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 import torch
 
-from drl_ra.agent import JointD3QNAgent
+from drl_ra.agent import D3QNAgent, JointD3QNAgent
 from drl_ra.config import load_config
 from drl_ra.environment import SAGINEnv, Task
 from drl_ra.experiment import evaluate_joint_agent, train_joint_agent
@@ -174,3 +174,30 @@ def test_resource_baseline_retains_analytic_replica_plan():
     assert info["resource_ratio"] == ratio
     trained, history = train_joint_agent(cfg, 3, progress=False, metrics_only=True, analytic_replicas=True)
     assert trained.analytic_replicas and np.isfinite(history[-1]["loss"])
+
+
+def test_joint_behavior_cloning_auxiliary_training(tmp_path):
+    torch.set_num_threads(1)
+    cfg = config()
+    env = SAGINEnv(cfg, seed=7)
+    teacher = D3QNAgent(env.state_dim, env.action_dim, cfg, seed=7)
+    teacher_path = tmp_path / "teacher.pt"
+    teacher.save(teacher_path, {"method": "drl-ra"})
+    cfg["joint_bc"] = {
+        "enabled": True,
+        "teacher_checkpoint": str(teacher_path),
+        "initial_weight": 0.5,
+        "final_weight": 0.0,
+        "decay_fraction": 0.5,
+        "batch_size": 2,
+        "replay_capacity": 32,
+        "head_weights": {"primary": 1.0, "replica_count": 1.0, "replica_node": 1.0, "resource": 0.0},
+    }
+    agent, history = train_joint_agent(cfg, 7, progress=False, metrics_only=True)
+    assert agent.behavior_cloning
+    assert len(agent.bc_buffers["primary"]) > 0
+    assert len(agent.bc_buffers["replica_count"]) > 0
+    assert len(agent.bc_buffers["replica_node"]) > 0
+    assert "bc_loss" in history[-1] and "bc_weight" in history[-1]
+    assert history[-1]["bc_weight"] <= 0.5
+    assert "resource" not in agent.bc_buffers

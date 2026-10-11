@@ -2,6 +2,8 @@
 
 `joint-d3qn` 使用一个共享编码器和四个 dueling Q head，顺序选择主节点、总副本数、附加副本节点和计算资源比例。总副本数包含主节点，最多为 `environment.max_replicas`。`drl-ra-resource` 使用同样的资源状态与资源 head，但保留原 DRL-RA 规则副本规划，作为资源感知的解耦对照。两者使用相同的资源执行与奖励，便于比较学习副本策略的影响。原 `drl-ra`、`d3qn`、`drl-ra-learned-replica` 和 `d3qn-ppo` 入口继续可用。
 
+`joint-d3qn-bc` 是带 DRL-RA 先验的单阶段联合训练入口。它在 Joint-D3QN 的每个 RL 更新中加入 masked behavior-cloning auxiliary loss：主节点、副本数量和副本节点模仿冻结的 DRL-RA teacher，资源比例不加入 BC 标签而由 RL 学习。BC 权重默认在前 60% 训练任务内从 `0.5` 余弦衰减到 `0`，之后完全由 RL 优化。teacher checkpoint 通过 `joint_bc.teacher_checkpoint` 指定；Joint 策略仍按自己的 epsilon-greedy 动作执行，teacher 只产生标签。
+
 默认 20 个候选节点对应 185 维联合状态：4 维任务信息、每节点 7 维资源/队列/可靠性/链路特征、已选集合、主节点 one-hot 和目标副本数。主节点单独编码，避免同一副本集合中不同主节点产生状态混淆。
 
 资源等级在 `joint.resource_levels` 配置，默认为 `[0.25, 0.5, 0.75, 1.0]`。所有副本共享本次选择的比例，各节点实际分配的算力为该比例乘以节点当前可用算力。本地节点使用该设备的本地算力；本地队列继续独立计算。计算时间采用 `cycles / allocated_capacity`。远端沿用原计算功耗模型，本地沿用随算力平方变化的能耗模型，因此提高资源比例对两类节点的能耗影响不同。
@@ -25,6 +27,10 @@ reward.reliability * (R_joint - R_primary)
 ```powershell
 python train.py --method joint-d3qn --seed 42 --torch-threads 1
 python evaluate.py --method checkpoint --checkpoint outputs/joint-d3qn_seed42/model.pt --seeds 0 1 2 --output outputs/joint_evaluation.json
+
+python train.py --method joint-d3qn-bc --seed 42 --torch-threads 1 `
+  --set joint_bc.teacher_checkpoint=outputs/drl-ra_seed42/model.pt
+python evaluate.py --method checkpoint --checkpoint outputs/joint-d3qn-bc_seed42/model.pt --seeds 0 1 2 --output outputs/joint_bc_evaluation.json
 
 python train.py --method drl-ra-resource --seed 42 --torch-threads 1
 python evaluate.py --method checkpoint --checkpoint outputs/drl-ra-resource_seed42/model.pt --seeds 0 1 2 --output outputs/resource_evaluation.json

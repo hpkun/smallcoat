@@ -49,3 +49,36 @@ class ReplayBuffer:
             next_masks=np.stack([row[5] for row in rows]).astype(bool),
             discounts=np.asarray([row[6] for row in rows], dtype=np.float32),
         )
+
+
+@dataclass(frozen=True)
+class BehaviorCloningBatch:
+    states: np.ndarray
+    action_masks: np.ndarray
+    target_masks: np.ndarray
+
+
+class BehaviorCloningBuffer:
+    """Replay for masked teacher labels, including set-valued actions."""
+
+    def __init__(self, capacity: int, seed: int) -> None:
+        self._data: deque[tuple[np.ndarray, np.ndarray, np.ndarray]] = deque(maxlen=capacity)
+        self._rng = np.random.default_rng(seed)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def add(self, state: np.ndarray, action_mask: np.ndarray, target_mask: np.ndarray) -> None:
+        valid_targets = np.asarray(action_mask, dtype=bool) & np.asarray(target_mask, dtype=bool)
+        if not valid_targets.any():
+            raise ValueError("behavior-cloning sample has no valid teacher action")
+        self._data.append((state.copy(), np.asarray(action_mask, dtype=bool).copy(), valid_targets.copy()))
+
+    def sample(self, batch_size: int) -> BehaviorCloningBatch:
+        indices = self._rng.choice(len(self._data), size=batch_size, replace=False)
+        rows = [self._data[int(index)] for index in indices]
+        return BehaviorCloningBatch(
+            states=np.stack([row[0] for row in rows]).astype(np.float32),
+            action_masks=np.stack([row[1] for row in rows]).astype(bool),
+            target_masks=np.stack([row[2] for row in rows]).astype(bool),
+        )

@@ -179,7 +179,10 @@ def build_hierarchical_agent(env: SAGINEnv, config: dict[str, Any], seed: int, d
 
 
 def build_joint_agent(env: SAGINEnv, config: dict[str, Any], seed: int, device: str, analytic_replicas: bool = False) -> JointD3QNAgent:
-    return JointD3QNAgent(env, config, seed, device=device, analytic_replicas=analytic_replicas)
+    return JointD3QNAgent(
+        env, config, seed, device=device, analytic_replicas=analytic_replicas,
+        behavior_cloning=bool(config.get("joint_bc", {}).get("enabled", False)),
+    )
 
 
 def train_joint_agent(
@@ -190,6 +193,20 @@ def train_joint_agent(
     seed_everything(seed)
     env_type = MetricsOnlySAGINEnv if metrics_only else SAGINEnv
     env = env_type(config, seed=seed)
+    bc_cfg = config.get("joint_bc", {})
+    use_bc = bool(bc_cfg.get("enabled", False)) and not analytic_replicas
+    if use_bc:
+        teacher_checkpoint = bc_cfg.get("teacher_checkpoint")
+        if not teacher_checkpoint:
+            raise ValueError("joint_bc.teacher_checkpoint is required when joint_bc.enabled=true")
+        teacher_config = deepcopy(config)
+        teacher_config.pop("joint_bc", None)
+        teacher_config["environment"]["enable_redundancy"] = True
+        teacher = build_agent("drl-ra", env, teacher_config, seed + 10_000, device)
+        teacher.load(teacher_checkpoint)
+        teacher.online.eval()
+    else:
+        teacher = None
     agent = build_joint_agent(env, config, seed, device, analytic_replicas=analytic_replicas)
     train_cfg = config["training"]
     epsilon = float(train_cfg["epsilon_start"])
@@ -199,23 +216,38 @@ def train_joint_agent(
         env.reset(seed=seed * 10_000 + episode)
         total_reward = 0.0
         losses: list[float] = []
+        episode_stats: list[dict[str, float | str]] = []
         done = False
         while not done:
             _, selected, ratio, transitions = agent.decide(env, epsilon)
+            if teacher is not None:
+                teacher_state = env._state_from_candidates(env.current_task, env.candidates)
+                teacher_mask = np.asarray([candidate.available for candidate in env.candidates], dtype=bool)
+                teacher_primary = teacher.act(teacher_state, teacher_mask, epsilon=0.0)
+                teacher_replicas = [item.action for item in env._replica_plan(env.candidates[teacher_primary])
+                                    if teacher_mask[item.action]]
+                agent.add_teacher_labels(transitions, teacher_primary, teacher_replicas)
             _, reward, terminated, truncated, info = env.step_joint(selected, ratio)
             done = terminated or truncated
             losses.extend(agent.observe_sequence(
                 transitions, reward, env.joint_observation(), done,
                 agent._node_mask(env), cost=float(info["cost"]),
             ))
+            episode_stats.extend(agent.last_sequence_stats)
             total_reward += reward
         summary = env.summary()
+        stats = episode_stats
         history.append({"episode": float(episode + 1), "reward": total_reward,
                         "loss": float(np.mean(losses)) if losses else float("nan"),
+                        "td_loss": float(np.mean([row["td_loss"] for row in stats])) if stats else float("nan"),
+                        "bc_loss": float(np.mean([row["bc_loss"] for row in stats])) if stats else 0.0,
+                        "total_loss": float(np.mean([row["total_loss"] for row in stats])) if stats else float("nan"),
+                        "bc_weight": agent.bc_weight(),
+                        "bc_skipped_labels": float(agent.bc_skipped_labels),
                         "epsilon": epsilon, "lagrange": agent.lagrange, **summary})
         epsilon = max(float(train_cfg["epsilon_end"]), epsilon * float(train_cfg["epsilon_decay"]))
         if progress and (episode == 0 or (episode + 1) % max(1, episodes // 10) == 0):
-            method = "drl-ra-resource" if analytic_replicas else "joint-d3qn"
+            method = "drl-ra-resource" if analytic_replicas else ("joint-d3qn-bc" if use_bc else "joint-d3qn")
             print(f"episode={episode + 1}/{episodes} {method} reward={total_reward:.2f} "
                   f"TCR={summary['tcr']:.1f}% CVR={summary['cvr']:.1f}% "
                   f"replicas={summary['mean_replicas']:.2f}", flush=True)

@@ -1,0 +1,121 @@
+{
+  "schema_version": 2,
+  "task_id": "example-cni-video-backhaul-001",
+  "semantics": {
+    "family": "CNI",
+    "task_type": "video_backhaul_receive",
+    "scenario": "example_tactical_video_link",
+    "direction": "rx",
+    "base_priority": 4,
+    "scenario_stage": "video_delivery",
+    "subtype": "high_throughput_ofdm_video",
+    "trigger": "continuous_stream",
+    "extension": {
+      "data_rate_mbps": 25,
+      "modulation_coding": "64QAM_LDPC_rate_3_4",
+      "link_quality": 0.9,
+      "payload_mib": 50
+    }
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 100,
+    "duration_ms": 1000,
+    "period_ms": 1000,
+    "max_response_ms": 100,
+    "security_level": 3,
+    "max_latency_ms": 100,
+    "min_throughput_mbps": 20,
+    "min_reliability": 0.99,
+    "quality_constraints": [
+      {"metric": "goodput", "comparator": ">=", "value": 20, "unit": "Mbps"}
+    ],
+    "scheduling": {
+      "preemptible": true,
+      "can_preempt": false,
+      "migratable": true,
+      "degradable": true,
+      "shareable": false,
+      "reconfiguration_ms": 2
+    }
+  },
+  "resources": {
+    "cpu_millicores": 800,
+    "memory_mib": 2048,
+    "dsp_units": 2,
+    "fpga_units": 1,
+    "bandwidth_mbps": 50,
+    "rf_channels": 1,
+    "rf_bandwidth_mhz": 20
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "video-rx", "role": "rf_receive", "capability": "cni_rf_receive",
+        "inputs": {}, "outputs": {"samples": "iq/complex"},
+        "estimated_runtime_ms": 1, "parameters": {"sample_rate_mhz": 40},
+        "shareable": true, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 1, "setup_ms": 0.1, "resources": {"cpu_millicores": 0, "memory_mib": 128, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 50, "rf_channels": 1, "rf_bandwidth_mhz": 20}}
+        }
+      },
+      {
+        "id": "video-sync", "role": "ofdm_synchronization", "capability": "ofdm_timing_frequency_sync",
+        "inputs": {"samples": "iq/complex"}, "outputs": {"symbols": "iq/ofdm_symbols"},
+        "estimated_runtime_ms": 2, "parameters": {"cyclic_prefix_samples": 64},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 2, "setup_ms": 0.1, "resources": {"cpu_millicores": 0, "memory_mib": 128, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 50, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "video-fft", "role": "ofdm_fft", "capability": "ofdm_fft_transform",
+        "inputs": {"symbols": "iq/ofdm_symbols"}, "outputs": {"grid": "ofdm/resource_grid"},
+        "estimated_runtime_ms": 2, "parameters": {"fft_size": 2048},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 2, "setup_ms": 0.1, "resources": {"cpu_millicores": 0, "memory_mib": 256, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 50, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "video-equalizer", "role": "channel_equalization", "capability": "ofdm_channel_equalization",
+        "inputs": {"grid": "ofdm/resource_grid"}, "outputs": {"equalized": "ofdm/equalized_grid"},
+        "estimated_runtime_ms": 2, "parameters": {"pilot_tracking": true},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 2, "setup_ms": 0.1, "resources": {"cpu_millicores": 0, "memory_mib": 256, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 40, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "video-qam-demod", "role": "qam_demodulation", "capability": "qam_soft_demodulation",
+        "inputs": {"equalized": "ofdm/equalized_grid"}, "outputs": {"soft_bits": "data/soft_bits"},
+        "estimated_runtime_ms": 2, "parameters": {"modulation_order": 64},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 2, "setup_ms": 0.1, "resources": {"cpu_millicores": 0, "memory_mib": 128, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 30, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "video-ldpc", "role": "channel_decoding", "capability": "ldpc_decoding",
+        "inputs": {"soft_bits": "data/soft_bits"}, "outputs": {"payload": "data/video_payload"},
+        "estimated_runtime_ms": 5, "parameters": {"code_rate": "3/4"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 5, "setup_ms": 0.2, "resources": {"cpu_millicores": 0, "memory_mib": 512, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 30, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      }
+    ],
+    "edges": [
+      {"source": "video-rx", "source_port": "samples", "target": "video-sync", "target_port": "samples"},
+      {"source": "video-sync", "source_port": "symbols", "target": "video-fft", "target_port": "symbols"},
+      {"source": "video-fft", "source_port": "grid", "target": "video-equalizer", "target_port": "grid"},
+      {"source": "video-equalizer", "source_port": "equalized", "target": "video-qam-demod", "target_port": "equalized"},
+      {"source": "video-qam-demod", "source_port": "soft_bits", "target": "video-ldpc", "target_port": "soft_bits"}
+    ]
+  },
+  "state": {
+    "status": "pending", "observed_at_ms": 0, "progress": 0,
+    "current_priority": 4, "remaining_work": 50, "work_unit": "payload_mib",
+    "allocated_resources": {"cpu_millicores": 0, "memory_mib": 0, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0, "rf_channels": 0, "rf_bandwidth_mhz": 0}
+  }
+}

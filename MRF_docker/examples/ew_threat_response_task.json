@@ -1,0 +1,159 @@
+{
+  "schema_version": 2,
+  "task_id": "example-ew-threat-response-001",
+  "semantics": {
+    "family": "EW",
+    "task_type": "threat_response",
+    "scenario": "example_emitter_detection_and_countermeasure",
+    "direction": "rx_tx",
+    "base_priority": 10,
+    "scenario_stage": "threat_detection_to_countermeasure",
+    "subtype": "esm_triggered_drFM_response",
+    "trigger": "threat_alert",
+    "extension": {
+      "threat_level": 5,
+      "response_limit_ms": 0.5,
+      "intercept_bandwidth_mhz": 500,
+      "jamming_mode": "deceptive_DRFM"
+    }
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 1,
+    "duration_ms": 1,
+    "max_response_ms": 0.5,
+    "security_level": 4,
+    "max_latency_ms": 1,
+    "min_reliability": 0.999,
+    "quality_constraints": [
+      {"metric": "threat_to_countermeasure_latency", "comparator": "<=", "value": 0.5, "unit": "ms"}
+    ],
+    "scheduling": {
+      "preemptible": false,
+      "can_preempt": true,
+      "migratable": false,
+      "degradable": false,
+      "shareable": false,
+      "reconfiguration_ms": 0.05
+    }
+  },
+  "resources": {
+    "cpu_millicores": 1000,
+    "memory_mib": 1024,
+    "dsp_units": 2,
+    "fpga_units": 2,
+    "bandwidth_mbps": 500,
+    "rf_channels": 1,
+    "rf_bandwidth_mhz": 500
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "ew-rx", "role": "wideband_receive", "capability": "wideband_rf_receive",
+        "inputs": {}, "outputs": {"wideband": "iq/wideband"},
+        "estimated_runtime_ms": 0.03,
+        "parameters": {"instantaneous_bandwidth_mhz": 500},
+        "shareable": true, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.03, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 128, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 1, "rf_bandwidth_mhz": 500}}
+        }
+      },
+      {
+        "id": "ew-channelizer", "role": "digital_channelization", "capability": "wideband_digital_channelizer",
+        "inputs": {"wideband": "iq/wideband"}, "outputs": {"channels": "ew/channelized_iq"},
+        "estimated_runtime_ms": 0.06,
+        "parameters": {"channel_count": 1024},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.06, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 128, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ew-spectrum-scan", "role": "spectrum_scan", "capability": "fast_spectrum_sensing",
+        "inputs": {"channels": "ew/channelized_iq"}, "outputs": {"candidates": "ew/emitter_candidates"},
+        "estimated_runtime_ms": 0.03,
+        "parameters": {"fft_size": 4096, "scan_mode": "parallel"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.03, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 400, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ew-parameter-estimation", "role": "emitter_parameter_estimation", "capability": "instantaneous_frequency_and_pulse_analysis",
+        "inputs": {"candidates": "ew/emitter_candidates"}, "outputs": {"features": "ew/emitter_features"},
+        "estimated_runtime_ms": 0.05,
+        "parameters": {"features": "frequency,pulse_width,pri"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.05, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 100, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ew-doa", "role": "direction_finding", "capability": "doa_estimation",
+        "inputs": {"channels": "ew/channelized_iq"}, "outputs": {"bearing": "ew/bearing_estimate"},
+        "estimated_runtime_ms": 0.08,
+        "parameters": {"method": "array_processing"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.08, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 100, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ew-threat-fusion", "role": "threat_assessment", "capability": "emitter_classification_and_threat_assessment",
+        "inputs": {"features": "ew/emitter_features", "bearing": "ew/bearing_estimate"}, "outputs": {"alert": "ew/threat_alert"},
+        "estimated_runtime_ms": 0.04,
+        "parameters": {"priority_policy": "highest_threat_first"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "CPU": {"runtime_ms": 0.04, "setup_ms": 0, "resources": {"cpu_millicores": 200, "memory_mib": 32, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 10, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ew-activate", "role": "countermeasure_activation", "capability": "preemptive_jammer_activation",
+        "inputs": {"alert": "ew/threat_alert"}, "outputs": {"config": "ew/jammer_configuration"},
+        "estimated_runtime_ms": 0.03,
+        "parameters": {"container_mode": "hot_standby", "resource_action": "preempt_and_reserve"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "CPU": {"runtime_ms": 0.03, "setup_ms": 0, "resources": {"cpu_millicores": 300, "memory_mib": 32, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 1, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ew-drfm", "role": "drfm_replay", "capability": "digital_rf_memory_replay",
+        "inputs": {"config": "ew/jammer_configuration"}, "outputs": {"tx_iq": "iq/transmit"},
+        "estimated_runtime_ms": 0.05,
+        "parameters": {"waveform_preloaded": true, "mode": "deceptive_DRFM"},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.05, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 256, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ew-tx", "role": "jammer_transmit", "capability": "rf_transmit",
+        "inputs": {"tx_iq": "iq/transmit"}, "outputs": {"status": "ew/transmit_status"},
+        "estimated_runtime_ms": 0.02,
+        "parameters": {"power_mode": "configured_by_platform"},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.02, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 32, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 1, "rf_bandwidth_mhz": 500}}
+        }
+      }
+    ],
+    "edges": [
+      {"source": "ew-rx", "source_port": "wideband", "target": "ew-channelizer", "target_port": "wideband"},
+      {"source": "ew-channelizer", "source_port": "channels", "target": "ew-spectrum-scan", "target_port": "channels"},
+      {"source": "ew-spectrum-scan", "source_port": "candidates", "target": "ew-parameter-estimation", "target_port": "candidates"},
+      {"source": "ew-channelizer", "source_port": "channels", "target": "ew-doa", "target_port": "channels"},
+      {"source": "ew-parameter-estimation", "source_port": "features", "target": "ew-threat-fusion", "target_port": "features"},
+      {"source": "ew-doa", "source_port": "bearing", "target": "ew-threat-fusion", "target_port": "bearing"},
+      {"source": "ew-threat-fusion", "source_port": "alert", "target": "ew-activate", "target_port": "alert"},
+      {"source": "ew-activate", "source_port": "config", "target": "ew-drfm", "target_port": "config"},
+      {"source": "ew-drfm", "source_port": "tx_iq", "target": "ew-tx", "target_port": "tx_iq"}
+    ]
+  },
+  "state": {
+    "status": "pending", "observed_at_ms": 0, "progress": 0,
+    "current_priority": 10, "remaining_work": 1, "work_unit": "threat_response_events",
+    "allocated_resources": {"cpu_millicores": 0, "memory_mib": 0, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0, "rf_channels": 0, "rf_bandwidth_mhz": 0}
+  }
+}

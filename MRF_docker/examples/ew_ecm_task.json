@@ -1,0 +1,100 @@
+{
+  "schema_version": 2,
+  "task_id": "example-ew-ecm-drfm-response-001",
+  "semantics": {
+    "family": "EW",
+    "task_type": "electronic_countermeasure",
+    "scenario": "example_threat_driven_countermeasure",
+    "direction": "tx",
+    "base_priority": 10,
+    "scenario_stage": "countermeasure_transmit",
+    "subtype": "deceptive_drfm_jamming",
+    "trigger": "threat_alert",
+    "extension": {
+      "threat_level": 5,
+      "response_limit_ms": 0.5,
+      "intercept_bandwidth_mhz": 500,
+      "jamming_mode": "deceptive_DRFM"
+    }
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 0.5,
+    "duration_ms": 1,
+    "max_response_ms": 0.5,
+    "security_level": 5,
+    "max_latency_ms": 0.5,
+    "min_throughput_mbps": null,
+    "min_reliability": 0.999,
+    "quality_constraints": [
+      {"metric": "threat_to_transmit_latency", "comparator": "<=", "value": 0.5, "unit": "ms"}
+    ],
+    "scheduling": {
+      "preemptible": false,
+      "can_preempt": true,
+      "migratable": false,
+      "degradable": false,
+      "shareable": false,
+      "reconfiguration_ms": 0.05
+    }
+  },
+  "resources": {
+    "cpu_millicores": 500,
+    "memory_mib": 1024,
+    "dsp_units": 2,
+    "fpga_units": 2,
+    "bandwidth_mbps": 500,
+    "rf_channels": 1,
+    "rf_bandwidth_mhz": 500
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "ecm-drfm-capture", "role": "drfm_capture", "capability": "digital_rf_memory_capture",
+        "inputs": {}, "outputs": {"buffer": "data/drfm_buffer"},
+        "estimated_runtime_ms": 0.08, "parameters": {"capture_window_us": 50},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.08, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 256, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 1, "rf_bandwidth_mhz": 500}}
+        }
+      },
+      {
+        "id": "ecm-parameter-modulation", "role": "jamming_parameter_modulation", "capability": "countermeasure_parameter_modulation",
+        "inputs": {"buffer": "data/drfm_buffer"}, "outputs": {"configuration": "ew/jammer_configuration"},
+        "estimated_runtime_ms": 0.03, "parameters": {"mode": "deceptive_DRFM", "parameter_source": "threat_track"},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.03, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 50, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ecm-waveform-generation", "role": "waveform_generation", "capability": "drfm_waveform_generation",
+        "inputs": {"configuration": "ew/jammer_configuration"}, "outputs": {"tx_iq": "iq/transmit"},
+        "estimated_runtime_ms": 0.05, "parameters": {"waveform_preloaded": true},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.05, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 256, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "ecm-transmit", "role": "rf_transmit", "capability": "rf_transmit",
+        "inputs": {"tx_iq": "iq/transmit"}, "outputs": {"status": "ew/transmit_status"},
+        "estimated_runtime_ms": 0.02, "parameters": {"power_mode": "configured_by_platform"},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.02, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 32, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 1, "rf_bandwidth_mhz": 500}}
+        }
+      }
+    ],
+    "edges": [
+      {"source": "ecm-drfm-capture", "source_port": "buffer", "target": "ecm-parameter-modulation", "target_port": "buffer"},
+      {"source": "ecm-parameter-modulation", "source_port": "configuration", "target": "ecm-waveform-generation", "target_port": "configuration"},
+      {"source": "ecm-waveform-generation", "source_port": "tx_iq", "target": "ecm-transmit", "target_port": "tx_iq"}
+    ]
+  },
+  "state": {
+    "status": "pending", "observed_at_ms": 0, "progress": 0,
+    "current_priority": 10, "remaining_work": 1, "work_unit": "countermeasure_events",
+    "allocated_resources": {"cpu_millicores": 0, "memory_mib": 0, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0, "rf_channels": 0, "rf_bandwidth_mhz": 0}
+  }
+}

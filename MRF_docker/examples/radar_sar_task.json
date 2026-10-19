@@ -1,0 +1,121 @@
+{
+  "schema_version": 2,
+  "task_id": "example-radar-sar-imaging-001",
+  "semantics": {
+    "family": "Radar",
+    "task_type": "sar_imaging",
+    "scenario": "example_airborne_sar_collection",
+    "direction": "rx",
+    "base_priority": 3,
+    "scenario_stage": "image_formation",
+    "subtype": "stripmap_sar",
+    "trigger": "collection_complete",
+    "extension": {
+      "pri_us": 500,
+      "pulse_bandwidth_mhz": 100,
+      "fft_size": 8192,
+      "mode": "SAR_stripmap"
+    }
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 1000,
+    "duration_ms": 1000,
+    "max_response_ms": 1000,
+    "security_level": 3,
+    "max_latency_ms": 1000,
+    "min_throughput_mbps": null,
+    "min_reliability": 0.99,
+    "quality_constraints": [
+      {"metric": "image_formation_complete", "comparator": "==", "value": 1, "unit": "boolean_numeric"}
+    ],
+    "scheduling": {
+      "preemptible": true,
+      "can_preempt": false,
+      "migratable": true,
+      "degradable": true,
+      "shareable": false,
+      "reconfiguration_ms": 10
+    }
+  },
+  "resources": {
+    "cpu_millicores": 2000,
+    "memory_mib": 4096,
+    "dsp_units": 2,
+    "fpga_units": 2,
+    "bandwidth_mbps": 500,
+    "rf_channels": 1,
+    "rf_bandwidth_mhz": 100
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "sar-rx", "role": "rf_receive", "capability": "radar_rf_receive",
+        "inputs": {}, "outputs": {"samples": "iq/complex"},
+        "estimated_runtime_ms": 5, "parameters": {"sample_rate_mhz": 200},
+        "shareable": true, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 5, "setup_ms": 0.5, "resources": {"cpu_millicores": 0, "memory_mib": 512, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 500, "rf_channels": 1, "rf_bandwidth_mhz": 100}}
+        }
+      },
+      {
+        "id": "sar-ddc", "role": "ddc", "capability": "digital_down_conversion",
+        "inputs": {"samples": "iq/complex"}, "outputs": {"baseband": "iq/baseband"},
+        "estimated_runtime_ms": 20, "parameters": {"decimation": 4},
+        "shareable": true, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 25, "setup_ms": 0.5, "resources": {"cpu_millicores": 0, "memory_mib": 256, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 300, "rf_channels": 0, "rf_bandwidth_mhz": 0}},
+          "FPGA": {"runtime_ms": 20, "setup_ms": 0.5, "resources": {"cpu_millicores": 0, "memory_mib": 256, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 300, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "sar-pulse-compress", "role": "pulse_compression", "capability": "lfm_pulse_compression",
+        "inputs": {"baseband": "iq/baseband"}, "outputs": {"range": "radar/range_profile"},
+        "estimated_runtime_ms": 80, "parameters": {"waveform": "LFM", "pulse_bandwidth_mhz": 100},
+        "shareable": true, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 80, "setup_ms": 1, "resources": {"cpu_millicores": 0, "memory_mib": 1024, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 400, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "sar-motion-comp", "role": "motion_compensation", "capability": "sar_motion_compensation",
+        "inputs": {"range": "radar/range_profile"}, "outputs": {"compensated": "sar/motion_compensated"},
+        "estimated_runtime_ms": 120, "parameters": {"navigation_aiding": true},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "CPU": {"runtime_ms": 120, "setup_ms": 0, "resources": {"cpu_millicores": 1200, "memory_mib": 1024, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 200, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "sar-azimuth-compress", "role": "azimuth_compression", "capability": "sar_azimuth_compression",
+        "inputs": {"compensated": "sar/motion_compensated"}, "outputs": {"azimuth": "sar/azimuth_compressed"},
+        "estimated_runtime_ms": 300, "parameters": {"algorithm": "range_doppler"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 300, "setup_ms": 1, "resources": {"cpu_millicores": 0, "memory_mib": 2048, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 300, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "sar-image", "role": "image_formation", "capability": "sar_image_formation",
+        "inputs": {"azimuth": "sar/azimuth_compressed"}, "outputs": {"image": "sar/image_product"},
+        "estimated_runtime_ms": 400, "parameters": {"output_format": "geo_referenced_image"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "CPU": {"runtime_ms": 400, "setup_ms": 0, "resources": {"cpu_millicores": 1600, "memory_mib": 2048, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 200, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      }
+    ],
+    "edges": [
+      {"source": "sar-rx", "source_port": "samples", "target": "sar-ddc", "target_port": "samples"},
+      {"source": "sar-ddc", "source_port": "baseband", "target": "sar-pulse-compress", "target_port": "baseband"},
+      {"source": "sar-pulse-compress", "source_port": "range", "target": "sar-motion-comp", "target_port": "range"},
+      {"source": "sar-motion-comp", "source_port": "compensated", "target": "sar-azimuth-compress", "target_port": "compensated"},
+      {"source": "sar-azimuth-compress", "source_port": "azimuth", "target": "sar-image", "target_port": "azimuth"}
+    ]
+  },
+  "state": {
+    "status": "pending", "observed_at_ms": 0, "progress": 0,
+    "current_priority": 3, "remaining_work": 1, "work_unit": "collection_images",
+    "allocated_resources": {"cpu_millicores": 0, "memory_mib": 0, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0, "rf_channels": 0, "rf_bandwidth_mhz": 0}
+  }
+}

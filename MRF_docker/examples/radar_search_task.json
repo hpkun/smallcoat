@@ -1,0 +1,123 @@
+{
+  "schema_version": 2,
+  "task_id": "example-radar-search-001",
+  "semantics": {
+    "family": "Radar",
+    "task_type": "target_search",
+    "scenario": "example_airborne_search",
+    "direction": "rx",
+    "base_priority": 8,
+    "scenario_stage": "surveillance",
+    "subtype": "pulse_doppler_search",
+    "trigger": "periodic_pri",
+    "extension": {
+      "pri_us": 1000,
+      "pulse_bandwidth_mhz": 20,
+      "fft_size": 4096,
+      "mode": "search"
+    }
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 1,
+    "duration_ms": 1,
+    "period_ms": 1,
+    "max_response_ms": 1,
+    "security_level": 3,
+    "max_latency_ms": 1,
+    "min_reliability": 0.99,
+    "quality_constraints": [
+      {"metric": "detection_probability", "comparator": ">=", "value": 0.9, "unit": "ratio"},
+      {"metric": "false_alarm_probability", "comparator": "<=", "value": 0.000001, "unit": "ratio"}
+    ],
+    "scheduling": {
+      "preemptible": false,
+      "can_preempt": false,
+      "migratable": false,
+      "degradable": false,
+      "shareable": false,
+      "reconfiguration_ms": 0.1
+    }
+  },
+  "resources": {
+    "cpu_millicores": 500,
+    "memory_mib": 512,
+    "dsp_units": 2,
+    "fpga_units": 1,
+    "bandwidth_mbps": 100,
+    "rf_channels": 1,
+    "rf_bandwidth_mhz": 20
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "radar-rx", "role": "rf_receive", "capability": "radar_rf_receive",
+        "inputs": {}, "outputs": {"samples": "iq/complex"},
+        "estimated_runtime_ms": 0.05,
+        "parameters": {"sample_rate_mhz": 40, "channels": 1},
+        "shareable": true, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.05, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 100, "rf_channels": 1, "rf_bandwidth_mhz": 20}}
+        }
+      },
+      {
+        "id": "radar-ddc", "role": "ddc", "capability": "digital_down_conversion",
+        "inputs": {"samples": "iq/complex"}, "outputs": {"baseband": "iq/baseband"},
+        "estimated_runtime_ms": 0.1,
+        "parameters": {"decimation": 2},
+        "shareable": true, "preemptible": false,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.12, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 80, "rf_channels": 0, "rf_bandwidth_mhz": 0}},
+          "FPGA": {"runtime_ms": 0.08, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 80, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "pulse-compress", "role": "pulse_compression", "capability": "lfm_pulse_compression",
+        "inputs": {"baseband": "iq/baseband"}, "outputs": {"range": "radar/range_profile"},
+        "estimated_runtime_ms": 0.22,
+        "parameters": {"waveform": "LFM", "pulse_bandwidth_mhz": 20},
+        "shareable": true, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.22, "setup_ms": 0.03, "resources": {"cpu_millicores": 0, "memory_mib": 128, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 80, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "doppler-mtd", "role": "doppler_processing", "capability": "mti_mtd_fft",
+        "inputs": {"range": "radar/range_profile"}, "outputs": {"map": "radar/range_doppler"},
+        "estimated_runtime_ms": 0.25,
+        "parameters": {"fft_size": 4096, "coherent_pulses": 64, "mode": "MTD"},
+        "shareable": false, "preemptible": false,
+        "simulation_profile": {
+          "resource_levels": {"cpu": 2, "mem": 3, "dsp": 4, "fpga": 5, "bw": 4},
+          "latency_level": "L1",
+          "sharing_class": "P",
+          "preemption_class": "C"
+        },
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.25, "setup_ms": 0.03, "resources": {"cpu_millicores": 0, "memory_mib": 128, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 80, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "cfar-detect", "role": "target_detection", "capability": "cfar_detection",
+        "inputs": {"map": "radar/range_doppler"}, "outputs": {"detections": "radar/detections"},
+        "estimated_runtime_ms": 0.1,
+        "parameters": {"method": "CA-CFAR", "false_alarm_probability": 0.000001},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.1, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 20, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      }
+    ],
+    "edges": [
+      {"source": "radar-rx", "source_port": "samples", "target": "radar-ddc", "target_port": "samples"},
+      {"source": "radar-ddc", "source_port": "baseband", "target": "pulse-compress", "target_port": "baseband"},
+      {"source": "pulse-compress", "source_port": "range", "target": "doppler-mtd", "target_port": "range"},
+      {"source": "doppler-mtd", "source_port": "map", "target": "cfar-detect", "target_port": "map"}
+    ]
+  },
+  "state": {
+    "status": "pending", "observed_at_ms": 0, "progress": 0,
+    "current_priority": 8, "remaining_work": 1, "work_unit": "coherent_processing_intervals",
+    "allocated_resources": {"cpu_millicores": 0, "memory_mib": 0, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0, "rf_channels": 0, "rf_bandwidth_mhz": 0}
+  }
+}

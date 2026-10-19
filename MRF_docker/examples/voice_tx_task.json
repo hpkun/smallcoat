@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "task_id": "example-cni-voice-001",
+  "semantics": {
+    "family": "CNI",
+    "task_type": "voice_tx",
+    "scenario": "example_voice_transmission",
+    "direction": "tx",
+    "base_priority": 5
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 100,
+    "max_latency_ms": 80,
+    "min_throughput_mbps": 0.1,
+    "min_reliability": 0.99,
+    "quality_constraints": [
+      {"metric": "ber", "comparator": "<=", "value": 0.00001, "unit": "ratio"}
+    ]
+  },
+  "resources": {
+    "cpu_millicores": 500,
+    "memory_mib": 128,
+    "dsp_units": 1,
+    "fpga_units": 0,
+    "bandwidth_mbps": 1.0
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "source",
+        "capability": "voice_source",
+        "inputs": {},
+        "outputs": {"audio": "audio/pcm"},
+        "estimated_runtime_ms": 1
+      },
+      {
+        "id": "encode",
+        "capability": "voice_encode",
+        "inputs": {"audio": "audio/pcm"},
+        "outputs": {"frames": "voice/frames"},
+        "estimated_runtime_ms": 3,
+        "parameters": {"codec_profile": "example_profile"}
+      },
+      {
+        "id": "channel",
+        "capability": "channel_encode",
+        "inputs": {"frames": "voice/frames"},
+        "outputs": {"symbols": "coded/symbols"},
+        "estimated_runtime_ms": 4
+      }
+    ],
+    "edges": [
+      {"source": "source", "source_port": "audio", "target": "encode", "target_port": "audio"},
+      {"source": "encode", "source_port": "frames", "target": "channel", "target_port": "frames"}
+    ]
+  },
+  "state": {
+    "status": "pending",
+    "observed_at_ms": 10,
+    "progress": 0,
+    "current_priority": 5
+  },
+  "raw_artifacts": {
+    "sample_file": "not_included_in_representation.iq"
+  }
+}

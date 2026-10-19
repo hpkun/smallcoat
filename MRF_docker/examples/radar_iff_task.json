@@ -1,0 +1,90 @@
+{
+  "schema_version": 2,
+  "task_id": "example-radar-iff-identification-001",
+  "semantics": {
+    "family": "Radar",
+    "task_type": "iff_identification",
+    "scenario": "example_airborne_iff_interrogation",
+    "direction": "rx_tx",
+    "base_priority": 9,
+    "scenario_stage": "reply_decoding",
+    "subtype": "pulse_reply_identity_decision",
+    "trigger": "interrogation_reply",
+    "extension": {
+      "pri_us": 10000,
+      "pulse_bandwidth_mhz": 1,
+      "fft_size": 256,
+      "mode": "IFF_reply_decode"
+    }
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 1,
+    "duration_ms": 1,
+    "max_response_ms": 1,
+    "security_level": 4,
+    "max_latency_ms": 1,
+    "min_throughput_mbps": null,
+    "min_reliability": 0.999,
+    "quality_constraints": [
+      {"metric": "reply_decode_success", "comparator": ">=", "value": 0.99, "unit": "ratio"}
+    ],
+    "scheduling": {
+      "preemptible": false,
+      "can_preempt": false,
+      "migratable": false,
+      "degradable": false,
+      "shareable": false,
+      "reconfiguration_ms": 0.1
+    }
+  },
+  "resources": {
+    "cpu_millicores": 300,
+    "memory_mib": 256,
+    "dsp_units": 1,
+    "fpga_units": 1,
+    "bandwidth_mbps": 20,
+    "rf_channels": 1,
+    "rf_bandwidth_mhz": 10
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "iff-pulse-detect", "role": "pulse_detection", "capability": "iff_pulse_detection",
+        "inputs": {}, "outputs": {"pulses": "iff/pulse_candidates"},
+        "estimated_runtime_ms": 0.05, "parameters": {"detection_window_us": 100},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.05, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 20, "rf_channels": 1, "rf_bandwidth_mhz": 10}}
+        }
+      },
+      {
+        "id": "iff-decode", "role": "reply_decoding", "capability": "iff_reply_decoder",
+        "inputs": {"pulses": "iff/pulse_candidates"}, "outputs": {"reply": "iff/decoded_reply"},
+        "estimated_runtime_ms": 0.1, "parameters": {"reply_format": "platform_profile"},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.1, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 64, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 10, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "iff-identity", "role": "identity_decision", "capability": "iff_identity_assessment",
+        "inputs": {"reply": "iff/decoded_reply"}, "outputs": {"identity": "iff/identity_result"},
+        "estimated_runtime_ms": 0.05, "parameters": {"decision_policy": "validate_then_classify"},
+        "shareable": false, "preemptible": false,
+        "execution_profiles": {
+          "CPU": {"runtime_ms": 0.05, "setup_ms": 0, "resources": {"cpu_millicores": 300, "memory_mib": 32, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 1, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      }
+    ],
+    "edges": [
+      {"source": "iff-pulse-detect", "source_port": "pulses", "target": "iff-decode", "target_port": "pulses"},
+      {"source": "iff-decode", "source_port": "reply", "target": "iff-identity", "target_port": "reply"}
+    ]
+  },
+  "state": {
+    "status": "pending", "observed_at_ms": 0, "progress": 0,
+    "current_priority": 9, "remaining_work": 1, "work_unit": "interrogation_replies",
+    "allocated_resources": {"cpu_millicores": 0, "memory_mib": 0, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0, "rf_channels": 0, "rf_bandwidth_mhz": 0}
+  }
+}

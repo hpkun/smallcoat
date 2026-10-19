@@ -1,0 +1,109 @@
+{
+  "schema_version": 2,
+  "task_id": "example-cni-tactical-voice-rx-001",
+  "semantics": {
+    "family": "CNI",
+    "task_type": "tactical_voice_receive",
+    "scenario": "example_tactical_voice_link",
+    "direction": "rx",
+    "base_priority": 7,
+    "scenario_stage": "voice_delivery",
+    "subtype": "low_rate_tactical_voice",
+    "trigger": "periodic_voice_frame",
+    "extension": {
+      "data_rate_mbps": 0.064,
+      "modulation_coding": "QPSK_convolutional_rate_1_2",
+      "link_quality": 0.8,
+      "payload_mib": 0.02
+    }
+  },
+  "qos": {
+    "arrival_ms": 0,
+    "deadline_ms": 20,
+    "duration_ms": 20,
+    "period_ms": 20,
+    "max_response_ms": 20,
+    "security_level": 3,
+    "max_latency_ms": 20,
+    "min_throughput_mbps": 0.064,
+    "min_reliability": 0.99,
+    "quality_constraints": [],
+    "scheduling": {
+      "preemptible": true,
+      "can_preempt": false,
+      "migratable": true,
+      "degradable": false,
+      "shareable": false,
+      "reconfiguration_ms": 0.5
+    }
+  },
+  "resources": {
+    "cpu_millicores": 300,
+    "memory_mib": 128,
+    "dsp_units": 1,
+    "fpga_units": 1,
+    "bandwidth_mbps": 0.2,
+    "rf_channels": 1,
+    "rf_bandwidth_mhz": 2
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "voice-rx", "role": "rf_receive", "capability": "cni_rf_receive",
+        "inputs": {}, "outputs": {"samples": "iq/complex"},
+        "estimated_runtime_ms": 0.1, "parameters": {"sample_rate_mhz": 4},
+        "shareable": true, "preemptible": true,
+        "execution_profiles": {
+          "FPGA": {"runtime_ms": 0.1, "setup_ms": 0.02, "resources": {"cpu_millicores": 0, "memory_mib": 32, "dsp_units": 0, "fpga_units": 1, "bandwidth_mbps": 0.2, "rf_channels": 1, "rf_bandwidth_mhz": 2}}
+        }
+      },
+      {
+        "id": "voice-sync", "role": "frame_synchronization", "capability": "digital_frame_synchronization",
+        "inputs": {"samples": "iq/complex"}, "outputs": {"symbols": "cni/symbols"},
+        "estimated_runtime_ms": 0.2, "parameters": {"frame_ms": 20},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.2, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 16, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 0.2, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "voice-demod", "role": "digital_demodulation", "capability": "qpsk_demodulation",
+        "inputs": {"symbols": "cni/symbols"}, "outputs": {"soft_bits": "data/soft_bits"},
+        "estimated_runtime_ms": 0.3, "parameters": {"modulation": "QPSK"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.3, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 16, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 0.1, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "voice-fec", "role": "channel_decoding", "capability": "convolutional_fec_decoding",
+        "inputs": {"soft_bits": "data/soft_bits"}, "outputs": {"bits": "data/decoded_bits"},
+        "estimated_runtime_ms": 0.4, "parameters": {"code_rate": "1/2"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "DSP": {"runtime_ms": 0.4, "setup_ms": 0.01, "resources": {"cpu_millicores": 0, "memory_mib": 32, "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 0.1, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      },
+      {
+        "id": "voice-codec", "role": "voice_decoding", "capability": "tactical_voice_codec",
+        "inputs": {"bits": "data/decoded_bits"}, "outputs": {"audio": "audio/pcm"},
+        "estimated_runtime_ms": 0.5, "parameters": {"codec": "narrowband_voice"},
+        "shareable": false, "preemptible": true,
+        "execution_profiles": {
+          "CPU": {"runtime_ms": 0.5, "setup_ms": 0, "resources": {"cpu_millicores": 300, "memory_mib": 32, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0.05, "rf_channels": 0, "rf_bandwidth_mhz": 0}}
+        }
+      }
+    ],
+    "edges": [
+      {"source": "voice-rx", "source_port": "samples", "target": "voice-sync", "target_port": "samples"},
+      {"source": "voice-sync", "source_port": "symbols", "target": "voice-demod", "target_port": "symbols"},
+      {"source": "voice-demod", "source_port": "soft_bits", "target": "voice-fec", "target_port": "soft_bits"},
+      {"source": "voice-fec", "source_port": "bits", "target": "voice-codec", "target_port": "bits"}
+    ]
+  },
+  "state": {
+    "status": "pending", "observed_at_ms": 0, "progress": 0,
+    "current_priority": 7, "remaining_work": 1, "work_unit": "voice_frames",
+    "allocated_resources": {"cpu_millicores": 0, "memory_mib": 0, "dsp_units": 0, "fpga_units": 0, "bandwidth_mbps": 0, "rf_channels": 0, "rf_bandwidth_mhz": 0}
+  }
+}

@@ -7,6 +7,7 @@
 - [组件静态库](task_repr/data/components.json)：C01-C32 的功能与资源等级。
 - [运行接口说明](task_repr/runtime/README.md)：数据包、端口、组件调用方法及测量口径。
 - [C08 运行代码](task_repr/component_models/common/fft_component.py)：`FFTComponent(RuntimeComponent)`，也是公共运行模板。
+- [C08 DAG 执行器](task_executor/README.md)：按任务图顺序执行 FFT/IFFT 节点并转发 `DataPacket`。
 
 ## 已实现的 12 个核心运行组件
 

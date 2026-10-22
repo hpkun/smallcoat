@@ -5,6 +5,7 @@
 - [模块说明](task_repr/README.md)：数据结构、标定口径和代码边界。
 - [任务样例](examples/README.md)：CNI、Radar、EW、ISAC 的任务输入。
 - [组件静态库](task_repr/data/components.json)：C01-C32 的功能与资源等级。
+- [能力映射表](task_repr/data/capability_map.json)：任务 capability 到 12 个运行组件的候选关系及匹配条件。
 - [运行接口说明](task_repr/runtime/README.md)：数据包、端口、组件调用方法及测量口径。
 - [C08 运行代码](task_repr/component_models/common/fft_component.py)：`FFTComponent(RuntimeComponent)`，也是公共运行模板。
 - [C08 DAG 执行器](task_executor/README.md)：按任务图顺序执行 FFT/IFFT 节点并转发 `DataPacket`。
@@ -35,6 +36,20 @@ component = create_runtime_component("C08", fft_size=1024)
 ```
 
 组件统一提供 `process(packet)`、`push(packet)` 和 `flush()` 接口。`process` 用于独立数据块，`push` 用于连续一维数据流，`flush` 用于结束流处理；所有调用都会通过 `RuntimeMetrics` 记录耗时、吞吐、输入输出数量、缓冲区峰值和错误次数。
+
+## 能力映射表
+
+`task_repr/data/capability_map.json` 使用完整的 capability ID 精确查找候选 CID，并保留每个组件的匹配条件。一个能力以后可以对应多个候选组件；找不到明确条目时返回空结果，不根据名称中的 `fft` 等片段猜测。映射表覆盖当前 12 个运行组件，例如 `digital_down_conversion → C03`、`ofdm_fft_transform → C08`。后者仍须确认 OFDM 节点的符号输入和资源栅格输出与 C08 的时域输入和频域输出是否兼容。`mti_mtd_fft` 没有映射到 C08；其功能对应 C22，而 C22 目前没有运行实现。
+
+```python
+from task_repr import default_capability_map
+
+candidates = default_capability_map().candidates_for("digital_down_conversion")
+for candidate in candidates:
+    print(candidate.cid, candidate.match_condition)
+```
+
+查询只返回候选；静态匹配还需检查节点参数、输入输出数据域和端口格式，以及运行实现与资源约束，才可创建 `ComponentInstance`。表中 `fir_filter`、`iir_filter`、`known_preamble_frame_synchronization`、`fft`、`ifft`、`ofdm_tx`、`ofdm_rx`、`iq_delay_replay` 是供后续任务模板使用的明确能力 ID。
 
 在项目根目录验证：
 

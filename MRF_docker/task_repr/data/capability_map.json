@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "mappings": [
+    {
+      "cid": "C03",
+      "capabilities": ["digital_down_conversion", "ddc"],
+      "match_condition": "抽取或插值参数与频率配置正确；当前运行组件支持 DDC 和 DUC 两种模式。"
+    },
+    {
+      "cid": "C05",
+      "capabilities": ["fir_filter", "iir_filter"],
+      "match_condition": "滤波类型、截止频率或滤波器系数齐全，且与 FIR/IIR 配置一致。"
+    },
+    {
+      "cid": "C07",
+      "capabilities": ["digital_frame_synchronization", "known_preamble_frame_synchronization"],
+      "match_condition": "仅匹配已知前导的帧同步；必须提供前导序列等配置，不涵盖完整 OFDM 定时与频偏同步。"
+    },
+    {
+      "cid": "C08",
+      "capabilities": ["fft", "ifft", "ofdm_fft_transform"],
+      "match_condition": "FFT 点数、变换方向、输入域和输出格式兼容；OFDM 符号到资源栅格的契约需要另行验证或适配。"
+    },
+    {
+      "cid": "C09",
+      "capabilities": ["wideband_digital_channelizer"],
+      "match_condition": "通道数、输出维度及信道提取方式兼容。"
+    },
+    {
+      "cid": "C14",
+      "capabilities": ["qpsk_demodulation", "qam_soft_demodulation"],
+      "match_condition": "调制方式、阶数及软判决或硬判决模式正确。"
+    },
+    {
+      "cid": "C15",
+      "capabilities": ["ofdm_tx", "ofdm_rx"],
+      "match_condition": "OFDM 收发模式、子载波、循环前缀、导频及组帧配置完整；不直接等同于单独的 OFDM 同步或均衡节点。"
+    },
+    {
+      "cid": "C17",
+      "capabilities": ["convolutional_fec_decoding"],
+      "match_condition": "仅匹配卷积码解码，码长和编解码参数明确；其他 FEC 类型不在当前运行实现范围内。"
+    },
+    {
+      "cid": "C21",
+      "capabilities": ["lfm_pulse_compression"],
+      "match_condition": "必须提供匹配滤波参考波形，并校验输入采样与输出距离像契约。"
+    },
+    {
+      "cid": "C23",
+      "capabilities": ["cfar_detection"],
+      "match_condition": "当前支持 CA-CFAR；输入必须是功率数据。"
+    },
+    {
+      "cid": "C27",
+      "capabilities": ["fast_spectrum_sensing"],
+      "match_condition": "可输出 PSD 及检测事件；不直接输出完整辐射源特征。"
+    },
+    {
+      "cid": "C32",
+      "capabilities": ["iq_delay_replay", "digital_rf_memory_replay"],
+      "match_condition": "仅匹配离线 IQ 延迟与重放；需要 IQ 数据输入，不直接消费干扰控制配置。"
+    }
+  ]
+}

@@ -8,12 +8,13 @@ from .models import (ComponentDefinition, ComponentInstance, ComponentSimulation
                      TaskRepresentation, ValidationError, represent_task)
 from .resource import HardwareProfile, ResourceEstimator
 from .template import TaskTemplate, build_template, restore_task
+from .matching import StaticMatchResult, match_task
 
 __all__ = [
     "CapabilityMap", "CapabilityMapping", "ComponentCatalog", "ComponentDefinition", "ComponentInstance",
     "ComponentSimulationProfile", "HardwareProfile", "ResourceEstimator",
     "ResourceLevels", "ResourceProfile", "SimulationProfile", "TaskRepresentation",
-    "TaskTemplate", "ValidationError", "build_template", "default_capability_map",
+    "StaticMatchResult", "TaskTemplate", "ValidationError", "build_template", "default_capability_map",
     "default_component_catalog", "load_capability_map", "load_component_catalog",
-    "represent_task", "restore_task",
+    "match_task", "represent_task", "restore_task",
 ]

@@ -6,7 +6,7 @@ import copy
 from task_repr import represent_task
 
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos"
 
 
 class RadarAndElectronicWarfareExampleTests(unittest.TestCase):

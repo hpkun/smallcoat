@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "task_id": "signal-analysis-001",
+  "semantics": {
+    "family": "EW", "task_type": "signal_analysis", "scenario": "complex_iq_input",
+    "direction": "rx", "base_priority": 5
+  },
+  "qos": {
+    "arrival_ms": 0, "deadline_ms": 100,
+    "max_latency_ms": 80, "min_throughput_mbps": 0.1,
+    "min_reliability": 0.99, "quality_constraints": []
+  },
+  "resources": {
+    "cpu_millicores": 500, "memory_mib": 256,
+    "dsp_units": 1, "fpga_units": 0, "bandwidth_mbps": 1
+  },
+  "graph": {
+    "nodes": [
+      {
+        "id": "ddc-node", "capability": "digital_down_conversion",
+        "inputs": {"samples": "iq/complex"}, "outputs": {"baseband": "iq/baseband"},
+        "estimated_runtime_ms": 1,
+        "parameters": {"decimation": 2, "nco_frequency": 100000, "sample_rate_mhz": 4,
+                       "input_block_length": 4096, "output_block_length": 2048}
+      },
+      {
+        "id": "filter-node", "capability": "fir_filter",
+        "inputs": {"baseband": "iq/baseband"}, "outputs": {"filtered": "iq/baseband"},
+        "estimated_runtime_ms": 1,
+        "parameters": {"cutoff": 0.25, "sample_rate_mhz": 2,
+                       "input_block_length": 2048, "output_block_length": 2048}
+      },
+      {
+        "id": "sensing-node", "capability": "fast_spectrum_sensing",
+        "inputs": {"filtered": "iq/baseband"}, "outputs": {"psd": "spectrum/psd"},
+        "estimated_runtime_ms": 2,
+        "parameters": {"fft_length": 1024, "overlap": 0.5, "sample_rate_mhz": 2,
+                       "input_block_length": 2048, "output_block_length": 1024}
+      }
+    ],
+    "edges": [
+      {"source": "ddc-node", "source_port": "baseband", "target": "filter-node", "target_port": "baseband"},
+      {"source": "filter-node", "source_port": "filtered", "target": "sensing-node", "target_port": "filtered"}
+    ]
+  },
+  "state": {"status": "pending", "observed_at_ms": 0, "progress": 0, "current_priority": 5}
+}

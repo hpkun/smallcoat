@@ -6,8 +6,8 @@ import unittest
 from task_repr import ResourceLevels, ValidationError, represent_task
 
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "voice_tx_task.json"
-V2_EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "isac_joint_task.json"
+EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos" / "voice_tx_task.json"
+V2_EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos" / "isac_joint_task.json"
 
 
 class TaskRepresentationTests(unittest.TestCase):

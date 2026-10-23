@@ -5,7 +5,7 @@ import unittest
 from task_repr import represent_task
 
 
-EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos"
 V2_EXAMPLES = (
     "cni_tactical_voice_task.json",
     "cni_video_backhaul_task.json",

@@ -6,7 +6,7 @@ import unittest
 from task_repr import ValidationError, build_template, represent_task, restore_task
 
 
-EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "isac_joint_task.json"
+EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos" / "isac_joint_task.json"
 EXTENSIONS = {
     "CNI": {"data_rate_mbps": 10, "modulation_coding": "example_mcs",
             "link_quality": 0.8, "payload_mib": 1},

@@ -4,7 +4,7 @@
 
 ## 公共字段和口径
 
-输入 JSON 使用 `schema_version: 2`。输出仍为 `T_rep = {S,Q,R,G,X}`，并带任务 ID 和模式版本。旧版 `schema_version: 1` 输入继续可用，但不具备 v2 的公共模板功能。
+输入 JSON 使用 `schema_version: 2`。输出仍为 `T_rep = {S,Q,R,G,X}`，并带任务 ID 和模式版本。旧版 `schema_version: 1` 输入继续可用，但不具备 v2 的公共模板功能。任务图中的格式字符串现在作为 [OPS 协议 ID](SPECIFICATIONS.md) 解析；已实现组件的端口及配置由 OCS 定义。
 
 | 部分 | 公共字段 | 口径 |
 | --- | --- | --- |
@@ -47,8 +47,8 @@ CPU、MEM、DSP、FPGA、BW 各取 `0..5`，依次表示基本不占用、很低
 | --- | --- |
 | `cid`、`name`、`short_name` | 稳定组件编号、组件名与短名 |
 | `function` | 组件功能 |
-| `input_formats`、`output_formats` | 输入/输出数据描述；当前是可读的数据契约名称，尚非完整的类型系统或序列化协议定义 |
-| `configurable_parameters` | 主要可配置参数名称 |
+| `input_formats`、`output_formats` | 旧目录中的可读数据描述；12 个可运行组件的可验证协议端口见 `data/ocs.json` |
+| `configurable_parameters` | 旧目录中的主要参数名称；12 个可运行组件的类型化属性见 `data/ocs.json` |
 | `families` | 通用、CNI、Radar、EW、ISAC 等适用领域；查询某任务族时会自动包含“通用”组件 |
 | `typical_predecessors`、`typical_successors` | 典型处理链的前驱/后继提示；其中既可能是 CID，也可能是外部接口/功能名称，不等于某个任务的实际 DAG |
 | `primary_resources` | 主执行资源提示，不是排他的平台兼容清单 |

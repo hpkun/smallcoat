@@ -10,6 +10,7 @@ from typing import Mapping
 from ..catalog import CapabilityMap, default_capability_map
 from ..component_models.runtime_registry import create_runtime_component
 from ..models.task import TaskRepresentation, represent_task
+from ..specs import load_component_specs, load_protocol_specs
 from .contracts import check_node_ports
 from .rules import MatchRuleError, adapt_parameters
 
@@ -162,6 +163,8 @@ def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatch
     """返回完整或部分静态方案，保留每个无法匹配的节点和边的原因。"""
     task = _load_task(task)
     capability_map = capability_map or default_capability_map()
+    protocols = load_protocol_specs()
+    interfaces = load_component_specs(protocols=protocols)
     nodes = {node.node_id: node for node in task.G.nodes}
     options: dict[str, list[_Candidate]] = {}
     node_issues = []
@@ -176,9 +179,19 @@ def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatch
         for mapping in candidates:
             try:
                 parameters = adapt_parameters(task, node, mapping.cid)
+                interface = interfaces.get(mapping.cid)
+                if interface is None:
+                    raise MatchRuleError("UNSUPPORTED", f"no OCS for {mapping.cid}")
+                required_error = interface.check_required(parameters)
+                if required_error:
+                    raise MatchRuleError("NEEDS_PARAMETERS", required_error)
+                for name, value in parameters.items():
+                    property_error = interface.check_property(name, value)
+                    if property_error:
+                        raise MatchRuleError("INVALID_PARAMETERS", property_error)
                 component = create_runtime_component(mapping.cid, **parameters)
                 candidate = _Candidate(ComponentBinding(mapping.cid, parameters), component)
-                port_error = check_node_ports(node, component)
+                port_error = check_node_ports(node, component, interface, protocols)
                 if port_error:
                     raise MatchRuleError("INTERFACE_MISMATCH", port_error)
                 _signal_checks(task, node, candidate)

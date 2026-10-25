@@ -9,6 +9,7 @@ from .models import (ComponentDefinition, ComponentInstance, ComponentSimulation
 from .resource import HardwareProfile, ResourceEstimator
 from .template import TaskTemplate, build_template, restore_task
 from .matching import StaticMatchResult, match_task
+from .specs import ComponentSpec, PortSpec, ProtocolSpec, load_component_specs, load_protocol_specs
 
 __all__ = [
     "CapabilityMap", "CapabilityMapping", "ComponentCatalog", "ComponentDefinition", "ComponentInstance",
@@ -16,5 +17,6 @@ __all__ = [
     "ResourceLevels", "ResourceProfile", "SimulationProfile", "TaskRepresentation",
     "StaticMatchResult", "TaskTemplate", "ValidationError", "build_template", "default_capability_map",
     "default_component_catalog", "load_capability_map", "load_component_catalog",
-    "match_task", "represent_task", "restore_task",
+    "match_task", "represent_task", "restore_task", "ComponentSpec", "PortSpec",
+    "ProtocolSpec", "load_component_specs", "load_protocol_specs",
 ]

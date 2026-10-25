@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "protocols": [
+    {"id": "iq/complex", "version": "1.0", "domain": "time", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "samples"},
+    {"id": "iq/baseband", "version": "1.0", "domain": "time", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "samples"},
+    {"id": "iq/wideband", "version": "1.0", "domain": "time", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "samples"},
+    {"id": "iq/ofdm_symbols", "version": "1.0", "domain": "symbols", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "symbols"},
+    {"id": "ew/channelized_iq", "version": "1.0", "domain": "time", "dtype_kinds": ["c"], "dimensions": [2], "item_unit": "samples"},
+    {"id": "cni/symbols", "version": "1.0", "domain": "symbols", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "symbols"},
+    {"id": "data/soft_bits", "version": "1.0", "domain": "llr", "dtype_kinds": ["f"], "dimensions": [1], "item_unit": "bits"},
+    {"id": "data/decoded_bits", "version": "1.0", "domain": "bits", "dtype_kinds": ["u"], "dimensions": [1], "item_unit": "bits"},
+    {"id": "data/bits", "version": "1.0", "domain": "bits", "dtype_kinds": ["u"], "dimensions": [1], "item_unit": "bits"},
+    {"id": "radar/range_profile", "version": "1.0", "domain": "range", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "cells"},
+    {"id": "radar/power_map", "version": "1.0", "domain": "power", "dtype_kinds": ["f", "i", "u"], "dimensions": [1, 2], "item_unit": "cells"},
+    {"id": "radar/detections", "version": "1.0", "domain": "detections", "dtype_kinds": ["b"], "dimensions": [1, 2], "item_unit": "cells"},
+    {"id": "spectrum/psd", "version": "1.0", "domain": "psd", "dtype_kinds": ["f"], "dimensions": [1], "item_unit": "cells"},
+    {"id": "frequency/complex", "version": "1.0", "domain": "frequency", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "samples"},
+    {"id": "time/complex", "version": "1.0", "domain": "time", "dtype_kinds": ["c"], "dimensions": [1], "item_unit": "samples"}
+  ]
+}

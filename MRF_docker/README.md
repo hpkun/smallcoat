@@ -8,6 +8,7 @@
 - [能力映射表](task_repr/data/capability_map.json)：任务 capability 到 12 个运行组件的候选关系及匹配条件。
 - [静态匹配器](task_repr/matching/matcher.py)：按任务 JSON 生成组件绑定、连接关系及未满足约束。
 - [运行接口说明](task_repr/runtime/README.md)：数据包、端口、组件调用方法及测量口径。
+- [OPS/OCS 规格](task_repr/SPECIFICATIONS.md)：版本化公共协议、组件接口与现有任务格式的对应关系。
 - [C08 运行代码](task_repr/component_models/common/fft_component.py)：`FFTComponent(RuntimeComponent)`，也是公共运行模板。
 - [C08 DAG 执行器](task_executor/README.md)：按任务图顺序执行 FFT/IFFT 节点并转发 `DataPacket`。
 

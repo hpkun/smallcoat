@@ -2,11 +2,15 @@
 
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from .errors import ValidationError
 from .runtime.ports import RuntimePort
+from .runtime.packet import DataPacket
 
 
 _DATA = Path(__file__).resolve().parent / "data"
@@ -60,11 +64,30 @@ class ProtocolSpec:
             return f"protocol {self.id} requires {self}, but runtime port {port.name} has {port}"
         return None
 
+    def validate_packet(self, packet: DataPacket) -> str | None:
+        """Check the OPS fields observable in a runtime packet."""
+        if not isinstance(packet, DataPacket):
+            return f"protocol {self.id} requires a DataPacket"
+        if packet.domain != self.domain:
+            return f"protocol {self.id} requires domain {self.domain}, got {packet.domain}"
+        if packet.samples.dtype.kind not in self.dtype_kinds:
+            return f"protocol {self.id} requires dtype kind in {self.dtype_kinds}, got {packet.samples.dtype.kind}"
+        if packet.samples.ndim not in self.dimensions:
+            return f"protocol {self.id} requires dimensions in {self.dimensions}, got {packet.samples.ndim}"
+        if (not math.isfinite(packet.sample_rate) or packet.sample_rate <= 0 or
+                not math.isfinite(packet.center_frequency) or
+                not math.isfinite(packet.timestamp)):
+            return f"protocol {self.id} requires finite context and a positive sample rate"
+        if not np.all(np.isfinite(packet.samples)):
+            return f"protocol {self.id} requires finite samples"
+        return None
+
 
 @dataclass(frozen=True)
 class PortSpec:
     direction: str
-    protocols: tuple[str, ...]
+    protocols: tuple[str, ...] = ()
+    protocols_by_mode: dict[str, tuple[str, ...]] | None = None
 
 
 @dataclass(frozen=True)
@@ -92,11 +115,18 @@ class ComponentSpec:
         }[kind]()
         return None if valid else f"{self.cid}.{name} must be {kind}"
 
-    def check_port(self, name: str, protocol_id: str, runtime_port: RuntimePort) -> str | None:
+    def check_port(self, name: str, protocol_id: str, runtime_port: RuntimePort,
+                   configuration: dict[str, Any] | None = None) -> str | None:
         port = self.ports.get(name)
         if port is None or port.direction != runtime_port.direction:
             return f"{self.cid} has no {runtime_port.direction} OCS port {name}"
-        if protocol_id not in port.protocols:
+        allowed = port.protocols
+        if port.protocols_by_mode is not None:
+            mode = (configuration or {}).get("mode")
+            if not isinstance(mode, str) or mode not in port.protocols_by_mode:
+                return f"{self.cid} has no OCS port profile for mode {mode!r}"
+            allowed = port.protocols_by_mode[mode]
+        if protocol_id not in allowed:
             return f"{self.cid}.{name} does not declare OPS {protocol_id}"
         return None
 
@@ -132,8 +162,9 @@ def load_component_specs(path: str | Path | None = None,
     protocols = protocols if protocols is not None else load_protocol_specs()
     root = _object(_read(Path(path) if path is not None else _DATA / "ocs.json"),
                    "OCS", {"schema_version", "components"})
-    if type(root["schema_version"]) is not int or root["schema_version"] != 1:
-        raise ValidationError("OCS schema_version must be 1")
+    schema_version = root["schema_version"]
+    if type(schema_version) is not int or schema_version not in (1, 2):
+        raise ValidationError("OCS schema_version must be 1 or 2")
     if not isinstance(root["components"], list) or not root["components"]:
         raise ValidationError("OCS components must be a non-empty array")
     result = {}
@@ -152,20 +183,49 @@ def load_component_specs(path: str | Path | None = None,
             raise ValidationError(f"{cid} OCS ports must include in and out")
         ports = {}
         for name, raw_port in entry["ports"].items():
-            port = _object(raw_port, f"{cid}.{name}", {"direction", "protocols"})
+            if not isinstance(raw_port, dict):
+                raise ValidationError(f"{cid}.{name} must be an object")
+            fields = set(raw_port)
+            if fields == {"direction", "protocols"}:
+                port = raw_port
+                mode_profiles = None
+            elif schema_version == 2 and fields == {"direction", "protocols_by_mode"}:
+                port = raw_port
+                raw_profiles = port["protocols_by_mode"]
+                if not isinstance(raw_profiles, dict) or not raw_profiles or any(
+                    not isinstance(mode, str) or not mode.strip() for mode in raw_profiles
+                ):
+                    raise ValidationError(f"{cid}.{name} OCS mode profiles are invalid")
+                mode_profiles = {}
+                for mode, raw_refs in raw_profiles.items():
+                    refs = _list(raw_refs, f"{cid}.{name}.{mode}.protocols")
+                    if not set(refs) <= set(protocols):
+                        raise ValidationError(f"{cid}.{name}.{mode} references unknown OPS {sorted(set(refs) - set(protocols))}")
+                    mode_profiles[mode] = refs
+            else:
+                raise ValidationError(f"{cid}.{name} must declare protocols or v2 protocols_by_mode")
             direction = "input" if name == "in" else "output"
             if port["direction"] != direction:
                 raise ValidationError(f"{cid}.{name} direction must be {direction}")
-            refs = _list(port["protocols"], f"{cid}.{name}.protocols")
-            if not set(refs) <= set(protocols):
-                raise ValidationError(f"{cid}.{name} references unknown OPS {sorted(set(refs) - set(protocols))}")
-            ports[name] = PortSpec(direction, refs)
+            refs = ()
+            if mode_profiles is None:
+                refs = _list(port["protocols"], f"{cid}.{name}.protocols")
+                if not set(refs) <= set(protocols):
+                    raise ValidationError(f"{cid}.{name} references unknown OPS {sorted(set(refs) - set(protocols))}")
+            ports[name] = PortSpec(direction, refs, mode_profiles)
         properties = entry["properties"]
         if not isinstance(properties, dict) or not properties or any(
             not isinstance(name, str) or not name or kind not in _PROPERTY_TYPES
             for name, kind in properties.items()
         ):
             raise ValidationError(f"{cid} OCS properties have invalid names or types")
+        input_modes = ports["in"].protocols_by_mode
+        output_modes = ports["out"].protocols_by_mode
+        if (input_modes is None) != (output_modes is None) or (
+            input_modes is not None and (set(input_modes) != set(output_modes) or
+                                         properties.get("mode") != "string")
+        ):
+            raise ValidationError(f"{cid} OCS input and output mode profiles must agree")
         required_properties = entry.get("required_properties", [])
         if (not isinstance(required_properties, list) or
                 any(not isinstance(name, str) for name in required_properties) or

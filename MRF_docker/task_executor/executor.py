@@ -1,22 +1,30 @@
-"""Execute one finite, single-packet pass through a task function DAG."""
+"""Run one packet through a task DAG using the runtime component registry."""
 
 from collections import deque
 from collections.abc import Iterable
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Mapping
 
-from task_repr.component_models.runtime_registry import create_runtime_component
+from task_repr.component_models.runtime_registry import (RUNTIME_COMPONENT_REGISTRY,
+                                                         create_runtime_component)
+from task_repr.matching.contracts import (check_node_ports, validate_connection,
+                                          validate_runtime_packet, validate_signal_packet)
+from task_repr.matching.matcher import ComponentBinding, StaticMatchResult
 from task_repr.models.component import ComponentInstance
 from task_repr.models.task import TaskRepresentation
 from task_repr.runtime import DataPacket, RuntimeMetrics
+from task_repr.specs import load_component_specs, load_protocol_specs
 
 
 class DAGExecutionError(RuntimeError):
-    """A graph cannot be executed or a node failed during execution."""
+    """任务图无法执行，或节点在运行时失败。"""
 
 
 @dataclass(frozen=True)
 class ExecutionResult:
+    """保存节点输出、汇点输出、执行顺序和本次运行的测量结果。"""
+
     task_id: str
     completed: bool
     full_task_completed: bool
@@ -28,13 +36,11 @@ class ExecutionResult:
 
 
 class DAGExecutor:
-    """Run a validated task graph using explicit node-to-component bindings.
+    """根据显式节点绑定执行已校验的任务图。
 
-    A binding is a CID, using the node's parameters, or a ComponentInstance
-    with explicit runtime parameters. Unbound root nodes act as data sources
-    whose output packets are supplied by the caller.
-    Source packets are keyed by root node ID. Each node runs once per execute().
-    active_nodes selects an induced subgraph of an existing task DAG.
+    CID 绑定使用节点参数；ComponentInstance 绑定可提供独立的运行参数。
+    未绑定的根节点是数据源，由调用方按节点 ID 提供 DataPacket。
+    每次 execute() 让选中节点各运行一次；active_nodes 选择原图的诱导子图。
     """
 
     def __init__(self, task: TaskRepresentation,
@@ -56,6 +62,7 @@ class DAGExecutor:
         self.covers_full_task = len(self._nodes) == len(task.G.nodes)
         self._incoming = {node_id: [] for node_id in self._nodes}
         self._outgoing = {node_id: [] for node_id in self._nodes}
+        # 只保留所选子图内部的边，并检查任务声明的端口连接关系。
         used_inputs = set()
         for edge in task.G.edges:
             if edge.source not in all_nodes or edge.target not in all_nodes:
@@ -74,6 +81,7 @@ class DAGExecutor:
             self._incoming[edge.target].append(edge)
             self._outgoing[edge.source].append(edge)
 
+        # Kahn 拓扑排序同时确定可执行顺序；未遍历完说明图中存在环。
         pending = {node_id: len(edges) for node_id, edges in self._incoming.items()}
         ready = deque(node_id for node_id in self._nodes if pending[node_id] == 0)
         order = []
@@ -95,6 +103,7 @@ class DAGExecutor:
             raise DAGExecutionError(f"bindings reference unknown nodes: {sorted(unknown)}")
         self.instances = {}
         instance_ids = set()
+        # 当前单包适配器仅接受单输入/单输出组件；未绑定节点只能是数据源。
         for node_id, node in self._nodes.items():
             if len(node.outputs) != 1 or len(node.inputs) > 1 or len(self._incoming[node_id]) > 1:
                 raise DAGExecutionError(f"node {node_id} needs a single input/output runtime adapter")
@@ -112,19 +121,98 @@ class DAGExecutor:
                 raise TypeError(f"node {node_id} binding must be a CID or ComponentInstance")
             if instance.task_id != task.task_id:
                 raise DAGExecutionError(f"node {node_id} instance belongs to another task")
-            if instance.cid != "C08":
-                raise DAGExecutionError(f"node {node_id}: only C08 FFT/IFFT is supported")
+            if instance.cid not in RUNTIME_COMPONENT_REGISTRY:
+                raise DAGExecutionError(f"node {node_id}: no runtime implementation for {instance.cid}")
             if instance.instance_id in instance_ids:
                 raise DAGExecutionError(f"duplicate component instance ID: {instance.instance_id}")
             instance_ids.add(instance.instance_id)
             self.instances[node_id] = instance
+
+        self._strict = False
+        self._bindings: dict[str, ComponentBinding] = {}
+        self._protocols = None
+
+    @classmethod
+    def from_match(cls, task: TaskRepresentation,
+                   match_result: StaticMatchResult) -> "DAGExecutor":
+        """Build a fully checked executor from normalized static bindings."""
+        if not isinstance(task, TaskRepresentation):
+            raise TypeError("task must be a TaskRepresentation")
+        if not isinstance(match_result, StaticMatchResult):
+            raise TypeError("match_result must be a StaticMatchResult")
+        if match_result.task_id != task.task_id or match_result.status != "MATCHED" or match_result.unresolved:
+            raise DAGExecutionError("full execution requires a MATCHED result for this task")
+        nodes = {node.node_id: node for node in task.G.nodes}
+        expected_edges = [(edge.source, edge.target) for edge in task.G.edges]
+        if (set(match_result.bindings) != set(nodes) or
+                sorted(match_result.edges) != sorted(expected_edges)):
+            raise DAGExecutionError("match result does not cover all task nodes and edges")
+        bindings = {}
+        selected = {}
+        for node_id, binding in match_result.bindings.items():
+            if not isinstance(binding, ComponentBinding) or not isinstance(binding.parameters, dict):
+                raise DAGExecutionError(f"node {node_id} has an invalid match binding")
+            selected[node_id] = ComponentBinding(binding.cid, deepcopy(binding.parameters))
+            bindings[node_id] = ComponentInstance(f"{task.task_id}:{node_id}", binding.cid,
+                                                  task.task_id, deepcopy(binding.parameters))
+        executor = cls(task, bindings)
+        executor._strict = True
+        executor._bindings = selected
+        executor._protocols = load_protocol_specs()
+        executor._check_contracts(executor._create_components())
+        return executor
+
+    def _create_components(self):
+        components = {}
+        for node_id, instance in self.instances.items():
+            try:
+                components[node_id] = create_runtime_component(instance.cid,
+                                                                **instance.parameters)
+            except (TypeError, ValueError) as exc:
+                raise DAGExecutionError(f"cannot create node {node_id} ({instance.cid}): {exc}") from exc
+        return components
+
+    def _check_contracts(self, components):
+        interfaces = load_component_specs(protocols=self._protocols)
+        for node_id, node in self._nodes.items():
+            if len(node.inputs) != 1 or len(node.outputs) != 1:
+                raise DAGExecutionError(f"node {node_id} needs a single input/output runtime adapter")
+            instance = self.instances[node_id]
+            spec = interfaces.get(instance.cid)
+            if spec is None:
+                raise DAGExecutionError(f"node {node_id}: no OCS for {instance.cid}")
+            error = spec.check_required(instance.parameters)
+            for name, value in instance.parameters.items():
+                error = error or spec.check_property(name, value)
+            error = error or check_node_ports(node, components[node_id], spec,
+                                              self._protocols, instance.parameters)
+            if error:
+                raise DAGExecutionError(f"node {node_id}: {error}")
+        for edge in self.task.G.edges:
+            error = validate_connection(self.task, edge, self._nodes[edge.source],
+                                        self._nodes[edge.target], components[edge.source],
+                                        components[edge.target], self._bindings[edge.source],
+                                        self._bindings[edge.target])
+            if error:
+                raise DAGExecutionError(f"edge {edge.source}->{edge.target}: {error}")
+
+    def _check_packet(self, node_id, packet, direction, component):
+        node = self._nodes[node_id]
+        formats = node.inputs if direction == "input" else node.outputs
+        port = component.input_port if direction == "input" else component.output_port
+        error = validate_runtime_packet(next(iter(formats.values())), packet,
+                                        port, self._protocols)
+        error = error or validate_signal_packet(self.task, node, packet, direction,
+                                                self._bindings[node_id])
+        if error:
+            raise DAGExecutionError(f"node {node_id} {direction}: {error}")
 
     @property
     def completed(self) -> bool:
         return self.status == "completed"
 
     def execute(self, sources: Mapping[str, DataPacket]) -> ExecutionResult:
-        """Process every ready node once and return outputs from all DAG sinks."""
+        """让每个选中节点处理一次数据包，并返回所有汇点的输出。"""
         if self.status == "running":
             raise DAGExecutionError("executor is already running")
         self.status = "running"
@@ -139,14 +227,12 @@ class DAGExecutor:
                 if not isinstance(packet, DataPacket):
                     raise TypeError(f"source {node_id} requires a DataPacket")
 
-            components = {}
-            for node_id, instance in self.instances.items():
-                try:
-                    components[node_id] = create_runtime_component(instance.cid,
-                                                                    **instance.parameters)
-                except (TypeError, ValueError) as exc:
-                    raise DAGExecutionError(f"cannot create node {node_id} ({instance.cid}): {exc}") from exc
+            # 每次执行重新创建组件，避免上次运行的状态和指标影响本次结果。
+            components = self._create_components()
+            if self._strict:
+                self._check_contracts(components)
 
+            # 按拓扑顺序沿边取上游输出；未绑定根节点直接转发源数据包。
             outputs = {}
             for node_id in self.execution_order:
                 packet = (sources[node_id] if node_id in self.roots else
@@ -155,11 +241,16 @@ class DAGExecutor:
                 if component is None:
                     outputs[node_id] = packet
                     continue
+                if self._strict:
+                    self._check_packet(node_id, packet, "input", component)
                 try:
                     outputs[node_id] = component.process(packet)
                 except Exception as exc:
                     raise DAGExecutionError(f"node {node_id} ({component.cid}) failed: {exc}") from exc
+                if self._strict:
+                    self._check_packet(node_id, outputs[node_id], "output", component)
 
+            # 子图执行完成不等于整个任务完成，分别记录两种完成状态。
             result = ExecutionResult(
                 task_id=self.task.task_id,
                 completed=len(outputs) == len(self._nodes),

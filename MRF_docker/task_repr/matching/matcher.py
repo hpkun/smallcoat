@@ -11,7 +11,7 @@ from ..catalog import CapabilityMap, default_capability_map
 from ..component_models.runtime_registry import create_runtime_component
 from ..models.task import TaskRepresentation, represent_task
 from ..specs import load_component_specs, load_protocol_specs
-from .contracts import check_node_ports
+from .contracts import check_node_ports, validate_connection
 from .rules import MatchRuleError, adapt_parameters
 
 
@@ -129,23 +129,10 @@ def _edge_issue(task, edge, left, right, nodes):
         return MatchIssue("BLOCKED_BY_NODE", "one or both endpoint nodes are unresolved", edge=pair)
     source = nodes[edge.source]
     target = nodes[edge.target]
-    if source.outputs[edge.source_port] != target.inputs[edge.target_port]:
-        return MatchIssue("INTERFACE_MISMATCH", "task edge formats disagree", edge=pair)
-    if not left.component.output_port.can_connect_to(right.component.input_port):
-        return MatchIssue("INTERFACE_MISMATCH", "runtime port domain, dtype, dimensions or item_unit differ", edge=pair)
-    left_length = source.parameters.get("output_block_length")
-    right_length = target.parameters.get("input_block_length")
-    if left_length is not None and right_length is not None and left_length != right_length:
-        return MatchIssue("INTERFACE_MISMATCH", f"block length {left_length} does not equal {right_length}", edge=pair)
-    left_rate = source.parameters.get("sample_rate_mhz", task.S.extension.get("sample_rate_mhz"))
-    right_rate = target.parameters.get("sample_rate_mhz", task.S.extension.get("sample_rate_mhz"))
-    if left_rate is not None and right_rate is not None:
-        if left.binding.cid == "C03":
-            left_rate /= left.binding.parameters["decimation"]
-        elif left.binding.cid == "C09":
-            left_rate /= left.binding.parameters["decimation"]
-        if not math.isclose(left_rate, right_rate, rel_tol=1e-9):
-            return MatchIssue("INTERFACE_MISMATCH", f"sample rate {left_rate} MHz does not equal {right_rate} MHz", edge=pair)
+    error = validate_connection(task, edge, source, target, left.component,
+                                right.component, left.binding, right.binding)
+    if error:
+        return MatchIssue("INTERFACE_MISMATCH", error, edge=pair)
     return None
 
 
@@ -191,7 +178,7 @@ def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatch
                         raise MatchRuleError("INVALID_PARAMETERS", property_error)
                 component = create_runtime_component(mapping.cid, **parameters)
                 candidate = _Candidate(ComponentBinding(mapping.cid, parameters), component)
-                port_error = check_node_ports(node, component, interface, protocols)
+                port_error = check_node_ports(node, component, interface, protocols, parameters)
                 if port_error:
                     raise MatchRuleError("INTERFACE_MISMATCH", port_error)
                 _signal_checks(task, node, candidate)

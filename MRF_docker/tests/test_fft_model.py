@@ -2,8 +2,9 @@ import math
 import unittest
 from dataclasses import replace
 
-from task_repr import (ComponentInstance, HardwareProfile, ResourceEstimator,
-                       default_component_catalog)
+from components import ComponentInstance, default_component_catalog
+from resources import HardwareProfile
+from resources.estimator import ResourceEstimator
 
 
 class FFTModelTests(unittest.TestCase):

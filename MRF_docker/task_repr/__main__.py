@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from .models.task import represent_task
+from .parsing import represent_task
 
 
 def main() -> None:

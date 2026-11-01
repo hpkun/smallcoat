@@ -1,10 +1,10 @@
-"""Run: python -m examples.static_match_demo [task.json]"""
+"""运行静态匹配示例：python -m examples.static_match_demo [task.json]。"""
 
 import json
 from pathlib import Path
 import sys
 
-from task_repr import match_task
+from matching import match_task
 
 
 def main() -> None:

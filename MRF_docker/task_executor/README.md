@@ -7,7 +7,8 @@ import json
 from pathlib import Path
 
 from task_executor import DAGExecutor
-from task_repr import match_task, represent_task
+from matching import match_task
+from task_repr import represent_task
 
 task = represent_task(json.loads(Path("examples/TaskDemos/signal_analysis_task.json").read_text()))
 match = match_task(task)

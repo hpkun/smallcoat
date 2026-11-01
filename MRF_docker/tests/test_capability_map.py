@@ -3,8 +3,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from task_repr import ValidationError, default_capability_map, load_capability_map
-from task_repr.component_models.runtime_registry import RUNTIME_COMPONENT_REGISTRY
+from task_repr import ValidationError
+from components import default_capability_map, load_capability_map
+from components.implementations.runtime_registry import RUNTIME_COMPONENT_REGISTRY
 
 
 class CapabilityMapTests(unittest.TestCase):

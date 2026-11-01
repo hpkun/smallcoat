@@ -7,11 +7,13 @@ from unittest.mock import patch
 import numpy as np
 
 from task_executor import DAGExecutionError, DAGExecutor
-from task_repr import ComponentInstance, match_task, represent_task
-from task_repr.matching.matcher import ComponentBinding
-from task_repr.component_models.common.digital_filter_component import DigitalFilterComponent
+from components import ComponentInstance
+from matching import match_task
+from task_repr import represent_task
+from matching.matcher import ComponentBinding
+from components.implementations.common.digital_filter_component import DigitalFilterComponent
 from task_repr.models.task import FunctionGraph
-from task_repr.runtime import DataPacket
+from components.runtime import DataPacket
 
 
 TASK_PATH = (Path(__file__).resolve().parents[1] / "examples" / "TaskDemos" /

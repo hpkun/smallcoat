@@ -6,15 +6,15 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Mapping
 
-from task_repr.component_models.runtime_registry import (RUNTIME_COMPONENT_REGISTRY,
+from components.implementations.runtime_registry import (RUNTIME_COMPONENT_REGISTRY,
                                                          create_runtime_component)
-from task_repr.matching.contracts import (check_node_ports, validate_connection,
+from matching.contracts import (check_node_ports, validate_connection,
                                           validate_runtime_packet, validate_signal_packet)
-from task_repr.matching.matcher import ComponentBinding, StaticMatchResult
-from task_repr.models.component import ComponentInstance
+from matching.matcher import ComponentBinding, StaticMatchResult
+from components.models.component import ComponentInstance
 from task_repr.models.task import TaskRepresentation
-from task_repr.runtime import DataPacket, RuntimeMetrics
-from task_repr.specs import load_component_specs, load_protocol_specs
+from components.runtime import DataPacket, RuntimeMetrics
+from components.specs import load_component_specs, load_protocol_specs
 
 
 class DAGExecutionError(RuntimeError):

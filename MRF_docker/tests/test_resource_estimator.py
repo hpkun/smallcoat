@@ -1,11 +1,13 @@
 import unittest
 from unittest.mock import patch
 
-from task_repr import HardwareProfile, ResourceEstimator, ResourceProfile, default_component_catalog
-from task_repr.component_models import COMPONENT_MODEL_REGISTRY, ComponentModel
+from components import default_component_catalog
+from resources import HardwareProfile, ResourceProfile
+from resources.estimator import ResourceEstimator
+from resources.estimators import RESOURCE_MODEL_REGISTRY, ResourceModel
 
 
-class RecordingModel(ComponentModel):
+class RecordingModel(ResourceModel):
     def estimate(self, definition, parameters, hardware=None):
         return ResourceProfile(parameters["cpu_units"], 10, 0, 0, 5, "L2", 2.5)
 
@@ -29,7 +31,7 @@ class ResourceEstimatorTests(unittest.TestCase):
     def test_registered_model_receives_parameters_and_can_override_fallback(self):
         definition = default_component_catalog().get("C08")
         hardware = HardwareProfile()
-        with patch.dict(COMPONENT_MODEL_REGISTRY, {"C08": RecordingModel}):
+        with patch.dict(RESOURCE_MODEL_REGISTRY, {"C08": RecordingModel}):
             profile = ResourceEstimator().estimate(definition, {"cpu_units": 42}, hardware)
         self.assertEqual(profile.cpu, 42)
         self.assertEqual(profile.runtime_ms, 2.5)

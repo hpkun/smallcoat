@@ -1,12 +1,9 @@
-"""任务、组件和资源的数据模型。"""
+"""Task representation data structures."""
 
-from .component import ComponentDefinition, ComponentInstance, ComponentSimulationProfile
-from .resource import ExecutionProfile, ResourceLevels, ResourceProfile, Resources, SimulationProfile
-from .task import TaskRepresentation, represent_task
-from ..errors import ValidationError
+from .task import (Dependency, DynamicState, FunctionGraph, FunctionNode, QoS,
+                   QualityConstraint, SchedulingPolicy, Semantics,
+                   TaskRepresentation)
 
-__all__ = [
-    "ComponentDefinition", "ComponentInstance", "ComponentSimulationProfile",
-    "ExecutionProfile", "ResourceLevels", "ResourceProfile", "Resources",
-    "SimulationProfile", "TaskRepresentation", "ValidationError", "represent_task",
-]
+__all__ = ["Dependency", "DynamicState", "FunctionGraph", "FunctionNode",
+           "QoS", "QualityConstraint", "SchedulingPolicy", "Semantics",
+           "TaskRepresentation"]

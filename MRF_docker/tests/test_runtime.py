@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import numpy as np
 
-from task_repr.runtime import DataPacket, RuntimeComponent, RuntimePort
+from components.runtime import DataPacket, RuntimeComponent, RuntimePort
 
 
 class EchoComponent(RuntimeComponent):
@@ -83,7 +83,7 @@ class RuntimeContractTests(unittest.TestCase):
         component = EchoComponent()
         packet = DataPacket(np.ones(4, dtype=complex), 8, 100, 0, "time")
         # 整体调用 100 ns，内部算法 40 ns；不用不稳定的耗时阈值做断言。
-        with patch("task_repr.runtime.base.perf_counter_ns", side_effect=[100, 120, 160, 200]):
+        with patch("components.runtime.base.perf_counter_ns", side_effect=[100, 120, 160, 200]):
             component.process(packet)
         metrics = component.metrics
         self.assertEqual(metrics.processing_time_ns, 100)
@@ -100,10 +100,10 @@ class RuntimeContractTests(unittest.TestCase):
     def test_failed_calls_are_counted_without_success_throughput(self):
         component = EchoComponent()
         valid = DataPacket(np.ones(4, dtype=complex), 8, 100, 0, "time")
-        with patch("task_repr.runtime.base.perf_counter_ns", side_effect=[100, 120, 160, 200]):
+        with patch("components.runtime.base.perf_counter_ns", side_effect=[100, 120, 160, 200]):
             component.process(valid)
         invalid = DataPacket(valid.samples, 8, 100, 0, "frequency")
-        with patch("task_repr.runtime.base.perf_counter_ns", side_effect=[220, 270]):
+        with patch("components.runtime.base.perf_counter_ns", side_effect=[220, 270]):
             with self.assertRaises(ValueError):
                 component.process(invalid)
         metrics = component.metrics

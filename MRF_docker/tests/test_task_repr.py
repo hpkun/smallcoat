@@ -3,7 +3,8 @@ import json
 from pathlib import Path
 import unittest
 
-from task_repr import ResourceLevels, ValidationError, represent_task
+from task_repr import ValidationError, represent_task
+from resources import ResourceLevels
 
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos" / "voice_tx_task.json"

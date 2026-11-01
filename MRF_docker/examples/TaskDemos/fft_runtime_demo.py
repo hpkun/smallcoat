@@ -5,9 +5,10 @@ import json
 
 import numpy as np
 
-from task_repr import ComponentInstance, ResourceEstimator, default_component_catalog
-from task_repr.component_models.common.fft_component import FFTComponent
-from task_repr.runtime import DataPacket
+from components import ComponentInstance, default_component_catalog
+from resources.estimator import ResourceEstimator
+from components.implementations.common.fft_component import FFTComponent
+from components.runtime import DataPacket
 
 
 def main() -> None:

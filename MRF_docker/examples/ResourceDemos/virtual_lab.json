@@ -1,0 +1,18 @@
+{
+  "resource_id": "virtual-lab",
+  "nodes": [
+    {
+      "node_id": "cpu-simulator-01",
+      "kind": "virtual",
+      "capacity": {
+        "cpu_millicores": 4000,
+        "memory_mib": 8192,
+        "dsp_units": 0,
+        "fpga_units": 0,
+        "bandwidth_mbps": 1000,
+        "rf_channels": 0,
+        "rf_bandwidth_mhz": 0
+      }
+    }
+  ]
+}

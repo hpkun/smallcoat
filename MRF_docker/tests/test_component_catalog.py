@@ -4,10 +4,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from task_repr import ValidationError, default_component_catalog, load_component_catalog
+from task_repr import ValidationError
+from components import default_component_catalog, load_component_catalog
 
 
-CATALOG_PATH = Path(__file__).resolve().parents[1] / "task_repr" / "data" / "components.json"
+CATALOG_PATH = Path(__file__).resolve().parents[1] / "components" / "data" / "components.json"
 
 
 class ComponentCatalogTests(unittest.TestCase):

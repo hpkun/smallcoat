@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 import unittest
 
-from task_repr import match_task
-from task_repr.catalog import CapabilityMap, CapabilityMapping, default_capability_map
+from matching import match_task
+from components.catalog import CapabilityMap, CapabilityMapping, default_capability_map
 
 
 TASKS = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos"

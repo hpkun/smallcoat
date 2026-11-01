@@ -7,7 +7,7 @@ import numpy as np
 
 from task_executor import DAGExecutor
 from task_repr import represent_task
-from task_repr.runtime import DataPacket
+from components.runtime import DataPacket
 
 
 def main() -> None:

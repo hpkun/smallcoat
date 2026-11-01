@@ -4,11 +4,11 @@ import unittest
 
 import numpy as np
 
-from task_repr.component_models.runtime_registry import (
+from components.implementations.runtime_registry import (
     RUNTIME_COMPONENT_REGISTRY,
     create_runtime_component,
 )
-from task_repr.runtime import DataPacket
+from components.runtime import DataPacket
 
 
 def packet(samples, domain="time", sample_rate=1_000_000.0, timestamp=0.0):

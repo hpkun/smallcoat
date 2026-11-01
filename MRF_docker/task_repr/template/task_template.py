@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import json
 from typing import Sequence
 
-from ..models.resource import ExecutionProfile, Resources, SimulationProfile
+from resources.models import ExecutionProfile, Resources, SimulationProfile
 from ..models.task import (Dependency, DynamicState, FunctionGraph, FunctionNode,
                            QoS, Semantics, TaskRepresentation)
 from ..errors import ValidationError

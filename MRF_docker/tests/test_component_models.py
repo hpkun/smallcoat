@@ -1,7 +1,8 @@
 import unittest
 
-from task_repr import ComponentInstance, ResourceProfile, default_component_catalog
-from task_repr.component_models import COMPONENT_MODEL_REGISTRY, get_component_model
+from components import ComponentInstance, default_component_catalog
+from resources import ResourceProfile
+from resources.estimators import RESOURCE_MODEL_REGISTRY, get_component_model
 
 
 class ComponentModelBoundaryTests(unittest.TestCase):
@@ -16,7 +17,7 @@ class ComponentModelBoundaryTests(unittest.TestCase):
         self.assertIsNone(definition.estimated_runtime_ms)
 
     def test_only_fft_model_is_registered(self):
-        self.assertEqual(set(COMPONENT_MODEL_REGISTRY), {"C08"})
+        self.assertEqual(set(RESOURCE_MODEL_REGISTRY), {"C08"})
         self.assertEqual(get_component_model("C08").cid, "C08")
         self.assertIsNone(get_component_model("C03"))
 

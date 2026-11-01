@@ -6,13 +6,15 @@ import unittest
 
 import numpy as np
 
-from task_repr import ValidationError, load_component_specs, load_protocol_specs, match_task
-from task_repr.component_models.runtime_registry import RUNTIME_COMPONENT_REGISTRY
-from task_repr.runtime import DataPacket, RuntimePort
-from task_repr.matching.contracts import validate_runtime_packet
+from task_repr import ValidationError
+from components import load_component_specs, load_protocol_specs
+from matching import match_task
+from components.implementations.runtime_registry import RUNTIME_COMPONENT_REGISTRY
+from components.runtime import DataPacket, RuntimePort
+from matching.contracts import validate_runtime_packet
 
 
-DATA = Path(__file__).resolve().parents[1] / "task_repr" / "data"
+DATA = Path(__file__).resolve().parents[1] / "components" / "data"
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples" / "TaskDemos"
 
 

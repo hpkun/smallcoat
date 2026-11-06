@@ -29,7 +29,13 @@ assert restore_task(template, tasks[0]["task_id"]) == tasks[0]
 
 ## 进入组件匹配
 
-先针对具体任务把抽象功能细化为 `schema_version=2` 的任务图：为每个功能节点确定组件能力 ID、输入输出端口及数据格式、必要参数和可验证的时延与资源估计；同时保留原任务的优先级、截止时间和质量约束。`represent_task(v2_document)` 校验图无环、端口和字段契约，然后 `matching.match_task(task)` 依据能力映射、OPS/OCS、参数及连接条件筛选组件。结果包含绑定、已验证的边和 `unresolved` 问题；只有 `MATCHED` 才能继续资源规划。当前没有把抽象请求自动细化为 v2 的通用适配器，细化过程需要明确波形、算法和信号接口，不能凭抽象角色推断组件 CID。
+已有明确细化方案的业务请求可直接交给 `matching.match_task(raw)`，也可先 `parse_external_task(raw)` 后交给同一入口。细化规则保存在 `parsing/data/business_function_rules.json` 的 `refinement` 中：按任务类型和方向选择方案，将业务角色展开为零个、一个或多个规格节点，参数只从 `S.business_parameters` 的指定路径读取，端口格式必须存在于 OPS。零节点角色表示外部输入或输出边界；复合角色的内部边和业务角色之间的边都会保留。随后现有匹配器依据能力映射、OPS/OCS、参数及连接条件筛选 CID。
+
+当前已提供 `spectrum_analysis/rx` 方案，样例为 `examples/BusinessRequests/External/07_spectrum_analysis.json`。请求需明确选择 `processing.profile=ddc_fir_psd`。该方案将 `downconvert_iq` 展开为 DDC，将 `analyze_spectrum` 展开为 FIR 滤波和频谱感知。结果的 `refined_graph` 包含可追溯的规格节点、连接和外部边界；`MATCHED` 加 `match_scope=component_dag` 仅表示组件子图静态契约通过，不表示外部 IQ 流已绑定、端到端质量达标或资源已规划。原 `S/Q/R/X` 在细化阶段保留，未知资源仍为 `null`，不会凭空产生估计值。
+
+其他业务类型或缺少明确的输入格式、算法参数时返回 `NEEDS_REFINEMENT` 和 `unresolved`，不会给出 CID 绑定。要扩展业务类型，需补齐该任务角色的规格展开、参数来源、OPS 格式与可运行组件能力；语音发送目前缺少完整编解码和空口实现，因此仍待细化。
+
+独立的已细化 `schema_version=2` 任务图继续由 `represent_task(v2_document)` 校验，再交给 `match_task()`；该路径供已有完整执行与资源估计的任务使用。
 
 已有细化任务可直接验证匹配流程：
 

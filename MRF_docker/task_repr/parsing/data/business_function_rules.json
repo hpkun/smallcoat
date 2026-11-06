@@ -1,7 +1,72 @@
 {
   "schema_version": "rf_business_function_rules.v1",
-  "description": "业务级功能依赖规则：不引用具体组件CID，不假定调制体制、算法、处理器性能或端口契约。仅用于形成待细化的抽象功能DAG。",
+  "description": "业务级功能依赖规则不引用具体组件CID；只有显式声明的细化方案才规定能力、参数来源和端口契约。",
   "task_types": {
+    "spectrum_analysis": {
+      "family": "electronic_support",
+      "canonical_family": "EW",
+      "valid_directions": ["rx"],
+      "required_request_fields": ["processing"],
+      "branches": {
+        "main": ["acquire_iq_samples", "downconvert_iq", "analyze_spectrum", "deliver_spectrum"]
+      },
+      "quality_fields": {},
+      "open_questions": [],
+      "refinement": {
+        "direction": "rx",
+        "selection": {"path": "processing.profile", "equals": "ddc_fir_psd"},
+        "roles": {
+          "acquire_iq_samples": {"boundary": "source", "format": "iq/complex"},
+          "downconvert_iq": {
+            "steps": [
+              {
+                "id": "ddc",
+                "capability": "digital_down_conversion",
+                "input_format": "iq/complex",
+                "output_format": "iq/baseband",
+                "parameters": {
+                  "decimation": "processing.decimation",
+                  "nco_frequency_mhz": "processing.nco_frequency_mhz",
+                  "sample_rate_mhz": "processing.input_sample_rate_mhz",
+                  "input_block_length": "processing.input_block_length",
+                  "output_block_length": "processing.baseband_block_length"
+                }
+              }
+            ]
+          },
+          "analyze_spectrum": {
+            "steps": [
+              {
+                "id": "filter",
+                "capability": "fir_filter",
+                "input_format": "iq/baseband",
+                "output_format": "iq/baseband",
+                "parameters": {
+                  "cutoff": "processing.filter_cutoff",
+                  "sample_rate_mhz": "processing.baseband_sample_rate_mhz",
+                  "input_block_length": "processing.baseband_block_length",
+                  "output_block_length": "processing.baseband_block_length"
+                }
+              },
+              {
+                "id": "sensing",
+                "capability": "fast_spectrum_sensing",
+                "input_format": "iq/baseband",
+                "output_format": "spectrum/psd",
+                "parameters": {
+                  "fft_length": "processing.fft_length",
+                  "overlap": "processing.overlap",
+                  "sample_rate_mhz": "processing.baseband_sample_rate_mhz",
+                  "input_block_length": "processing.baseband_block_length",
+                  "output_block_length": "processing.fft_length"
+                }
+              }
+            ]
+          },
+          "deliver_spectrum": {"boundary": "sink", "format": "spectrum/psd", "expected_output": "spectrum_psd"}
+        }
+      }
+    },
     "voice_communication": {
       "family": "communication",
       "canonical_family": "CNI",

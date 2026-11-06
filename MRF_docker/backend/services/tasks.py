@@ -35,8 +35,7 @@ class TaskService:
         return represent_external_tasks(request)
 
     def match(self, document: dict) -> dict:
-        task = represent_task(document)
-        return match_task(task).to_dict()
+        return match_task(document).to_dict()
 
     def plan(self, document: dict) -> dict:
         task = represent_task(document)

@@ -130,9 +130,10 @@ class ExternalTaskTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["task_representation"]["task_id"],
                          "RF-COM-DATALINK-001")
-        self.assertEqual(client.post("/api/v1/matches",
-                                     json=response.json()["task_representation"]).status_code,
-                         422)
+        match_response = client.post("/api/v1/matches",
+                                     json=response.json()["task_representation"])
+        self.assertEqual(match_response.status_code, 200)
+        self.assertEqual(match_response.json()["status"], "NEEDS_REFINEMENT")
         collection = client.post("/api/v1/task-representations/external",
                                  json=example("all_tasks.json"))
         self.assertEqual(collection.status_code, 200)

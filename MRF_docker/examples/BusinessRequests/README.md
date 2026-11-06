@@ -24,4 +24,6 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8000/api/v1/task-representa
 
 结果包含 `task_template` 与 `task_representation`。当前抽象功能链为接收语音业务数据、准备语音载荷、经无线链路发送；编解码和调制算法须在后续功能细化时确定。本阶段不读取 PCM、不做组件匹配，也不运行发送链。
 
+静态组件匹配的完整样例为 `External/07_spectrum_analysis.json`。可将该请求提交到现有 `/api/v1/matches` 接口，或在项目根目录运行 `python -c "from matching import match_task; print(match_task('examples/BusinessRequests/External/07_spectrum_analysis.json').to_dict())"`。`MATCHED` 只表示其组件规格子图匹配成功；外部输入源和结果出口在 `refined_graph.boundaries` 中单独列出。
+
 可运行 `python -m task_repr.visualize` 生成任务表征图，默认输出到 `outputs/voice_task_representation.png`；使用 `-o outputs/voice_task_representation.svg` 可生成矢量图。

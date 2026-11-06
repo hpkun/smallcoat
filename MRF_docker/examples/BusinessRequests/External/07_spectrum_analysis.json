@@ -1,0 +1,32 @@
+{
+  "schema_version": "external_rf_task.v1",
+  "task_id": "RF-ES-SPECTRUM-001",
+  "family": "electronic_support",
+  "task_type": "spectrum_analysis",
+  "arrival_ms": 0,
+  "priority": 6,
+  "duration_ms": 1000,
+  "direction": "rx",
+  "request": {
+    "processing": {
+      "profile": "ddc_fir_psd",
+      "decimation": 2,
+      "nco_frequency_mhz": 0.1,
+      "input_sample_rate_mhz": 4,
+      "baseband_sample_rate_mhz": 2,
+      "input_block_length": 4096,
+      "baseband_block_length": 2048,
+      "filter_cutoff": 0.25,
+      "fft_length": 1024,
+      "overlap": 0.5
+    }
+  },
+  "performance": {},
+  "data_input": {
+    "kind": "complex_iq_stream",
+    "stream_id": "SIM-IQ-001",
+    "binding_status": "requires_generator_or_capture",
+    "format": "iq/complex"
+  },
+  "expected_output": ["spectrum_psd"]
+}

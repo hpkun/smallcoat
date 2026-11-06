@@ -9,7 +9,8 @@ from typing import Mapping
 
 from components.catalog import CapabilityMap, default_capability_map
 from components.implementations.runtime_registry import create_runtime_component
-from task_repr import TaskRepresentation, represent_task
+from task_repr import (RefinementResult, SpecificationTask, TaskRepresentation,
+                       parse_external_task, refine_business_task, represent_task)
 from components.specs import load_component_specs, load_protocol_specs
 from .contracts import check_node_ports, validate_connection
 from .rules import MatchRuleError, adapt_parameters
@@ -64,12 +65,17 @@ class StaticMatchResult:
     bindings: dict[str, ComponentBinding]
     edges: tuple[tuple[str, str], ...]
     unresolved: tuple[MatchIssue, ...]
+    refined_graph: dict | None = None
 
     def to_dict(self) -> dict:
-        return {"task_id": self.task_id, "status": self.status,
+        result = {"task_id": self.task_id, "status": self.status,
                 "bindings": {key: value.to_dict() for key, value in self.bindings.items()},
                 "edges": [list(edge) for edge in self.edges],
                 "unresolved": [issue.to_dict() for issue in self.unresolved]}
+        if self.refined_graph is not None:
+            result["refined_graph"] = self.refined_graph
+            result["match_scope"] = "component_dag"
+        return result
 
 
 @dataclass(frozen=True)
@@ -146,11 +152,15 @@ def _edge_issue(task, edge, left, right, nodes):
 
 def _load_task(task):
     """统一接收已解析任务、JSON 路径或原始任务字典。"""
-    if isinstance(task, TaskRepresentation):
+    if isinstance(task, (TaskRepresentation, SpecificationTask, RefinementResult)):
         return task
     if isinstance(task, (str, Path)):
-        return represent_task(json.loads(Path(task).read_text(encoding="utf-8")))
+        return _load_task(json.loads(Path(task).read_text(encoding="utf-8")))
     if isinstance(task, Mapping):
+        if task.get("schema_version") == "external_rf_task.v1":
+            task = parse_external_task(task)
+        if task.get("schema_version") == "rf_task_representation.v1":
+            return refine_business_task(task)
         return represent_task(task)
     raise TypeError("task must be a TaskRepresentation, JSON path or task mapping")
 
@@ -158,6 +168,14 @@ def _load_task(task):
 def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatchResult:
     """筛选可运行组件并校验 DAG 连接，返回绑定及未解决的问题。"""
     task = _load_task(task)
+    refined_graph = None
+    if isinstance(task, RefinementResult):
+        if task.task is None:
+            return StaticMatchResult(task.task_id, "NEEDS_REFINEMENT", {}, (),
+                                     tuple(MatchIssue(issue.code, issue.detail, issue.node_id)
+                                           for issue in task.issues))
+        refined_graph = task.task.G.to_dict()
+        task = task.task
     capability_map = capability_map or default_capability_map()
     protocols = load_protocol_specs()
     interfaces = load_component_specs(protocols=protocols)
@@ -228,4 +246,4 @@ def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatch
     # 有候选但仍有节点或边问题时标记 PARTIAL；完全无候选时标记 UNSUPPORTED。
     status = ("MATCHED" if not issues and len(bindings) == len(nodes) else
               "PARTIAL" if any_candidate else "UNSUPPORTED")
-    return StaticMatchResult(task.task_id, status, bindings, edges, issues)
+    return StaticMatchResult(task.task_id, status, bindings, edges, issues, refined_graph)

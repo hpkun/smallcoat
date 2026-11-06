@@ -237,7 +237,11 @@ def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatch
     chosen = best or {}
     if best_issues is None:
         best_issues = [_edge_issue(task, edge, None, None, nodes) for edge in task.G.edges]
-    issues = tuple(node_issues + best_issues)
+    output_issues = []
+    if isinstance(task, SpecificationTask):
+        output_issues = [MatchIssue("OUTPUT_NOT_COVERED", f"refinement profile does not produce {name}")
+                         for name in task.G.uncovered_outputs]
+    issues = tuple(node_issues + best_issues + output_issues)
     bindings = {node_id: candidate.binding for node_id, candidate in chosen.items()}
     # 部分匹配时也只公开已验证可连接的边，失败原因放入 unresolved。
     edges = tuple((edge.source, edge.target) for edge in task.G.edges

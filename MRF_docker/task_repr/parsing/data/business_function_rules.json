@@ -15,6 +15,7 @@
       "refinement": {
         "direction": "rx",
         "selection": {"path": "processing.profile", "equals": "ddc_fir_psd"},
+        "covered_outputs": ["spectrum_psd"],
         "roles": {
           "acquire_iq_samples": {"boundary": "source", "format": "iq/complex"},
           "downconvert_iq": {
@@ -114,6 +115,49 @@
         "voice_codec_and_payload_format",
         "air_interface_waveform_and_coding"
       ],
+      "refinements": [
+        {
+          "profile_id": "codec2_ofdm_qpsk_conv",
+          "profile_version": "1.0",
+          "completion_scope": "voice_radio_chain",
+          "covered_outputs": {"tx": ["transmitted_voice_signal"], "rx": ["decoded_audio_frames"], "tx_rx": ["transmitted_voice_signal", "decoded_audio_frames"]},
+          "prerequisites": ["双向任务须单独绑定接收IQ源并定义半双工收发时序"],
+          "frame_contract": "one_ofdm_symbol_qpsk_zero_tail_convolutional",
+          "directions": ["tx", "rx", "tx_rx"],
+          "selection": {"path": "processing.profile", "equals": "codec2_ofdm_qpsk_conv"},
+          "conditions": {"processing.codec": "codec2", "processing.waveform": "ofdm", "processing.modulation": "qpsk", "processing.channel_code": "convolutional", "processing.frame_format": "demo_crc_frame_v1", "processing.crc": "crc16"},
+          "required_parameters": ["processing.codec2_mode", "processing.codec2_frame_ms", "processing.frame_format", "processing.crc", "processing.frame_payload_bits", "processing.frame_header_bits", "processing.crc_bits", "processing.block_length", "processing.constraint_length", "processing.generators", "processing.fft_length", "processing.cp_length", "processing.subcarrier_allocation", "processing.pilot_pattern"],
+          "proposed_contracts": {
+            "audio/pcm": "带采样率、声道数和帧边界的PCM音频；当前OPS未定义",
+            "voice/frames": "带编码器模式、帧长及序列号的语音帧；当前OPS未定义",
+            "rf/emission": "实际无线发射结果；当前组件仅提供IQ仿真"
+          },
+          "roles": {
+            "accept_voice_service_data": {"boundary": "source", "format": "audio/pcm"},
+            "prepare_voice_payload": {"steps": [
+              {"id": "codec2_encode", "capability": "codec2_voice_encoding", "input_format": "audio/pcm", "output_format": "voice/frames", "parameters": {"mode": "processing.codec2_mode", "frame_ms": "processing.codec2_frame_ms"}},
+              {"id": "frame", "capability": "voice_frame_crc_pack", "input_format": "voice/frames", "output_format": "data/bits", "parameters": {"frame_format": "processing.frame_format", "crc": "processing.crc", "payload_bits": "processing.frame_payload_bits", "header_bits": "processing.frame_header_bits", "crc_bits": "processing.crc_bits"}},
+              {"id": "fec_encode", "capability": "convolutional_fec_encoding", "input_format": "data/bits", "output_format": "data/bits", "parameters": {"block_length": "processing.block_length", "constraint_length": "processing.constraint_length", "generators": {"path": "processing.generators", "encoding": "json"}}},
+              {"id": "qpsk_map", "capability": "qpsk_modulation", "input_format": "data/bits", "output_format": "cni/symbols", "parameters": {}}
+            ]},
+            "send_voice_over_radio": {"steps": [
+              {"id": "ofdm_tx", "capability": "ofdm_tx", "input_format": "cni/symbols", "output_format": "iq/complex", "parameters": {"fft_length": "processing.fft_length", "cp_length": "processing.cp_length", "subcarrier_allocation": {"path": "processing.subcarrier_allocation", "encoding": "json"}, "pilot_pattern": {"path": "processing.pilot_pattern", "encoding": "json"}}},
+              {"id": "rf_tx", "capability": "rf_signal_transmission", "input_format": "iq/complex", "output_format": "rf/emission", "parameters": {}}
+            ]},
+            "receive_voice_radio_signal": {"boundary": "source", "format": "iq/complex", "source_format_path": "business_parameters.processing.rx_input_format"},
+            "recover_voice_payload": {"steps": [
+              {"id": "sync", "capability": "ofdm_frame_alignment", "input_format": "iq/complex", "output_format": "iq/complex", "parameters": {}},
+              {"id": "ofdm_rx", "capability": "ofdm_rx", "input_format": "iq/complex", "output_format": "cni/symbols", "parameters": {"fft_length": "processing.fft_length", "cp_length": "processing.cp_length", "subcarrier_allocation": {"path": "processing.subcarrier_allocation", "encoding": "json"}, "pilot_pattern": {"path": "processing.pilot_pattern", "encoding": "json"}}},
+              {"id": "equalize", "capability": "ofdm_channel_equalization", "input_format": "cni/symbols", "output_format": "cni/symbols", "parameters": {}},
+              {"id": "qpsk_demod", "capability": "qpsk_demodulation", "input_format": "cni/symbols", "output_format": "data/soft_bits", "parameters": {}},
+              {"id": "fec_decode", "capability": "convolutional_fec_decoding", "input_format": "data/soft_bits", "output_format": "data/decoded_bits", "parameters": {"block_length": "processing.block_length", "constraint_length": "processing.constraint_length", "generators": {"path": "processing.generators", "encoding": "json"}}},
+              {"id": "frame_extract", "capability": "voice_frame_crc_verify", "input_format": "data/decoded_bits", "output_format": "voice/frames", "parameters": {"frame_format": "processing.frame_format", "crc": "processing.crc", "payload_bits": "processing.frame_payload_bits", "header_bits": "processing.frame_header_bits", "crc_bits": "processing.crc_bits"}},
+              {"id": "codec2_decode", "capability": "codec2_voice_decoding", "input_format": "voice/frames", "output_format": "audio/pcm", "parameters": {"mode": "processing.codec2_mode", "frame_ms": "processing.codec2_frame_ms"}}
+            ]},
+            "deliver_voice_service_data": {"boundary": "sink", "format": "audio/pcm", "expected_output": "decoded_audio_frames"}
+          }
+        }
+      ],
       "period_sources": [
         {
           "path": "request.traffic.frame_interval_ms",
@@ -172,6 +216,67 @@
         "data_link_protocol_and_waveform_profile",
         "channel_coding_and_frame_contract"
       ],
+      "refinements": [
+        {
+          "profile_id": "ofdm_qpsk_conv_tx",
+          "profile_version": "1.0",
+          "completion_scope": "data_link_transmit_chain",
+          "covered_outputs": [],
+          "prerequisites": ["当前仅校验每个报文分片的单符号调制子链；报文交付和统计仍需端到端验证"],
+          "frame_contract": "one_ofdm_symbol_qpsk_zero_tail_convolutional",
+          "directions": ["tx"],
+          "selection": {"path": "processing.profile", "equals": "ofdm_qpsk_conv_tx"},
+          "conditions": {"processing.waveform": "ofdm", "processing.modulation": "qpsk", "processing.channel_code": "convolutional", "processing.frame_format": "demo_crc_frame_v1", "processing.crc": "crc16"},
+          "input_kind": "application_message_stream",
+          "required_parameters": ["processing.frame_format", "processing.crc", "processing.fragment_payload_bytes", "processing.frame_payload_bits", "processing.frame_header_bits", "processing.crc_bits", "processing.block_length", "processing.constraint_length", "processing.generators", "processing.fft_length", "processing.cp_length", "processing.subcarrier_allocation", "processing.pilot_pattern"],
+          "proposed_contracts": {
+            "data/message": "带报文ID、长度及序列号的业务字节报文；当前OPS未定义",
+            "data/fragment": "带报文ID、分片序号、总数和有效载荷长度的报文分片；当前OPS未定义",
+            "rf/emission": "实际无线发射结果；C34仅模拟发射IQ效应，不能替代天线发射"
+          },
+          "roles": {
+            "accept_data_link_messages": {"boundary": "source", "format": "data/message"},
+            "prepare_data_link_frames": {"steps": [
+              {"id": "fragment", "capability": "data_link_message_fragmentation", "input_format": "data/message", "output_format": "data/fragment", "parameters": {"fragment_payload_bytes": "processing.fragment_payload_bytes"}},
+              {"id": "frame", "capability": "data_link_frame_crc_pack", "input_format": "data/fragment", "output_format": "data/bits", "parameters": {"frame_format": "processing.frame_format", "crc": "processing.crc", "payload_bits": "processing.frame_payload_bits", "header_bits": "processing.frame_header_bits", "crc_bits": "processing.crc_bits"}},
+              {"id": "fec_encode", "capability": "convolutional_fec_encoding", "input_format": "data/bits", "output_format": "data/bits", "parameters": {"block_length": "processing.block_length", "constraint_length": "processing.constraint_length", "generators": {"path": "processing.generators", "encoding": "json"}}},
+              {"id": "qpsk_map", "capability": "qpsk_modulation", "input_format": "data/bits", "output_format": "cni/symbols", "parameters": {}}
+            ]},
+            "transmit_data_link_frames": {"steps": [
+              {"id": "ofdm_tx", "capability": "ofdm_tx", "input_format": "cni/symbols", "output_format": "iq/complex", "parameters": {"fft_length": "processing.fft_length", "cp_length": "processing.cp_length", "subcarrier_allocation": {"path": "processing.subcarrier_allocation", "encoding": "json"}, "pilot_pattern": {"path": "processing.pilot_pattern", "encoding": "json"}}},
+              {"id": "rf_tx", "capability": "rf_signal_transmission", "input_format": "iq/complex", "output_format": "rf/emission", "parameters": {}}
+            ]}
+          }
+        },
+        {
+          "profile_id": "ofdm_qpsk_conv_rx",
+          "profile_version": "1.0",
+          "completion_scope": "data_link_receive_chain",
+          "covered_outputs": [],
+          "frame_contract": "one_ofdm_symbol_qpsk_zero_tail_convolutional",
+          "directions": ["rx"],
+          "selection": {"path": "processing.profile", "equals": "ofdm_qpsk_conv_rx"},
+          "conditions": {"processing.waveform": "ofdm", "processing.modulation": "qpsk", "processing.channel_code": "convolutional", "processing.frame_format": "demo_crc_frame_v1", "processing.crc": "crc16", "processing.frame_alignment": "aligned", "processing.channel_equalization": "ideal_channel"},
+          "input_kind": "aligned_iq_stream",
+          "prerequisites": ["已完成OFDM帧同步与频偏校正", "理想信道或已完成信道均衡", "分片重组仍需跨符号缓存并校验报文标识与序号"],
+          "required_parameters": ["processing.frame_alignment", "processing.channel_equalization", "processing.frame_format", "processing.crc", "processing.fragment_payload_bytes", "processing.frame_payload_bits", "processing.frame_header_bits", "processing.crc_bits", "processing.fft_length", "processing.cp_length", "processing.subcarrier_allocation", "processing.pilot_pattern", "processing.input_block_length", "processing.block_length", "processing.constraint_length", "processing.generators"],
+          "proposed_contracts": {
+            "data/message": "已通过CRC校验并恢复报文ID、长度和序列号的业务报文；当前OPS未定义",
+            "data/fragment": "含报文ID、分片序号和有效载荷的CRC验证后分片；当前OPS未定义"
+          },
+          "roles": {
+            "receive_data_link_frames": {"boundary": "source", "format": "iq/complex"},
+            "recover_data_link_messages": {"steps": [
+              {"id": "ofdm_rx", "capability": "ofdm_rx", "input_format": "iq/complex", "output_format": "cni/symbols", "parameters": {"fft_length": "processing.fft_length", "cp_length": "processing.cp_length", "subcarrier_allocation": {"path": "processing.subcarrier_allocation", "encoding": "json"}, "pilot_pattern": {"path": "processing.pilot_pattern", "encoding": "json"}, "input_block_length": "processing.input_block_length"}},
+              {"id": "qpsk_demod", "capability": "qpsk_demodulation", "input_format": "cni/symbols", "output_format": "data/soft_bits", "parameters": {}},
+              {"id": "fec_decode", "capability": "convolutional_fec_decoding", "input_format": "data/soft_bits", "output_format": "data/decoded_bits", "parameters": {"block_length": "processing.block_length", "constraint_length": "processing.constraint_length", "generators": {"path": "processing.generators", "encoding": "json"}}},
+              {"id": "frame_verify", "capability": "data_link_frame_crc_verify", "input_format": "data/decoded_bits", "output_format": "data/fragment", "parameters": {"frame_format": "processing.frame_format", "crc": "processing.crc", "payload_bits": "processing.frame_payload_bits", "header_bits": "processing.frame_header_bits", "crc_bits": "processing.crc_bits"}},
+              {"id": "reassemble", "capability": "data_link_message_reassembly", "input_format": "data/fragment", "output_format": "data/message", "parameters": {"fragment_payload_bytes": "processing.fragment_payload_bytes"}}
+            ]},
+            "deliver_data_link_messages": {"boundary": "sink", "format": "data/message"}
+          }
+        }
+      ],
       "period_sources": [
         {
           "path": "request.traffic.message_period_ms",
@@ -222,6 +327,40 @@
       "open_questions": [
         "radar_waveform_and_detection_processing_chain",
         "receive_sampling_and_frontend_configuration"
+      ],
+      "refinements": [
+        {
+          "profile_id": "lfm_pulse_doppler_ca_cfar",
+          "profile_version": "1.0",
+          "completion_scope": "radar_receive_detection_and_report",
+          "covered_outputs": ["target_detection_reports"],
+          "directions": ["rx", "tx_rx"],
+          "selection": {"path": "processing.profile", "equals": "lfm_pulse_doppler_ca_cfar"},
+          "conditions": {"processing.waveform": "lfm", "processing.detection_method": "ca_cfar"},
+          "input_kind": "rf_echo_stream",
+          "input_format": "iq/complex",
+          "required_parameters": ["processing.input_sample_rate_mhz", "processing.baseband_sample_rate_mhz", "processing.decimation", "processing.nco_frequency_mhz", "processing.input_block_length", "processing.baseband_block_length", "processing.reference_waveform", "processing.pulse_bandwidth_mhz", "processing.pulse_width_us", "processing.carrier_frequency_mhz", "processing.pri_us", "processing.cpi_pulses", "processing.doppler_fft_length", "processing.guard_cells", "processing.reference_cells", "processing.pfa"],
+          "proposed_contracts": {
+            "radar/range_pulse_matrix": "按PRI排列的多脉冲复数距离像，含距离单元和脉冲时间元数据；当前OPS未定义",
+            "radar/range_doppler_complex": "复数距离-多普勒二维矩阵，含距离和速度坐标；当前OPS未定义",
+            "radar/target_report": "含距离、径向速度、检测时间和坐标系的目标报告；当前OPS未定义"
+          },
+          "roles": {
+            "collect_search_observations": {"steps": [
+              {"id": "ddc", "capability": "digital_down_conversion", "input_format": "iq/complex", "output_format": "iq/baseband", "parameters": {"decimation": "processing.decimation", "nco_frequency_mhz": "processing.nco_frequency_mhz", "sample_rate_mhz": "processing.input_sample_rate_mhz", "input_block_length": "processing.input_block_length", "output_block_length": "processing.baseband_block_length"}},
+              {"id": "pulse_compression", "capability": "lfm_pulse_compression", "input_format": "iq/baseband", "output_format": "radar/range_profile", "parameters": {"reference_waveform": {"path": "processing.reference_waveform", "encoding": "json"}, "pulse_bandwidth_mhz": "processing.pulse_bandwidth_mhz", "sample_rate_mhz": "processing.baseband_sample_rate_mhz", "input_block_length": "processing.baseband_block_length"}}
+            ]},
+            "detect_candidate_targets": {"steps": [
+              {"id": "pulse_stack", "capability": "radar_range_pulse_assembly", "input_format": "radar/range_profile", "output_format": "radar/range_pulse_matrix", "parameters": {"pri_us": "processing.pri_us", "cpi_pulses": "processing.cpi_pulses"}},
+              {"id": "doppler", "capability": "radar_doppler_processing", "input_format": "radar/range_pulse_matrix", "output_format": "radar/range_doppler_complex", "parameters": {"fft_length": "processing.doppler_fft_length"}},
+              {"id": "power", "capability": "radar_range_doppler_power", "input_format": "radar/range_doppler_complex", "output_format": "radar/power_map", "parameters": {}},
+              {"id": "cfar", "capability": "cfar_detection", "input_format": "radar/power_map", "output_format": "radar/detections", "parameters": {"pfa": "processing.pfa", "guard_cells": "processing.guard_cells", "reference_cells": "processing.reference_cells"}}
+            ]},
+            "produce_search_report": {"steps": [
+              {"id": "report", "capability": "radar_target_report_generation", "input_format": "radar/detections", "output_format": "radar/target_report", "parameters": {}}
+            ]}
+          }
+        }
       ],
       "period_sources": [
         {
@@ -282,6 +421,44 @@
         "tracking_measurement_interface_and_data_association_method",
         "radar_waveform_if_new_echo_acquisition_required"
       ],
+      "refinements": [
+        {
+          "profile_id": "radar_echo_gnn_ekf",
+          "profile_version": "1.0",
+          "completion_scope": "radar_echo_to_track_report",
+          "covered_outputs": ["updated_track_estimates"],
+          "prerequisites": ["原始回波到结构化目标测量的处理链尚需按雷达搜索方案展开并验证；radar_echo_measurement_extraction 当前仅是未实现的复合能力"],
+          "directions": ["rx", "tx_rx"],
+          "selection": {"path": "processing.profile", "equals": "radar_echo_gnn_ekf"},
+          "conditions": {"processing.association_method": "gnn", "processing.filter_type": "ekf"},
+          "input_kind": "rf_echo_stream",
+          "input_format": "iq/complex",
+          "required_parameters": ["processing.coordinate_frame", "processing.measurement_covariance", "processing.motion_model", "processing.association_method", "processing.filter_type", "processing.measurement_timestamp_ms"],
+          "proposed_contracts": {
+            "radar/measurements": "带测量时间、距离、角度、速度、协方差和坐标系的目标测量记录；当前OPS未定义",
+            "radar/associations": "测量到轨迹的关联结果，含关联置信度；当前OPS未定义",
+            "radar/tracks": "带状态向量和协方差的轨迹状态；当前OPS未定义",
+            "radar/track_report": "带轨迹ID、时间、状态、协方差及生命周期的跟踪报告；当前OPS未定义"
+          },
+          "roles": {
+            "collect_tracking_observations": {"steps": [
+              {"id": "echo_measurements", "capability": "radar_echo_measurement_extraction", "input_format": "iq/complex", "output_format": "radar/measurements", "parameters": {}}
+            ]},
+            "derive_target_measurements": {"steps": [
+              {"id": "measurement_normalize", "capability": "radar_measurement_normalization", "input_format": "radar/measurements", "output_format": "radar/measurements", "parameters": {"coordinate_frame": "processing.coordinate_frame", "measurement_covariance": {"path": "processing.measurement_covariance", "encoding": "json"}, "measurement_timestamp_ms": "processing.measurement_timestamp_ms"}}
+            ]},
+            "associate_measurements_to_track": {"steps": [
+              {"id": "gnn", "capability": "radar_gnn_association", "input_format": "radar/measurements", "output_format": "radar/associations", "parameters": {"method": "processing.association_method"}}
+            ]},
+            "update_target_state_estimate": {"steps": [
+              {"id": "ekf", "capability": "radar_ekf_track_update", "input_format": "radar/associations", "output_format": "radar/tracks", "parameters": {"motion_model": "processing.motion_model", "filter_type": "processing.filter_type"}}
+            ]},
+            "publish_track_report": {"steps": [
+              {"id": "report", "capability": "radar_track_report_generation", "input_format": "radar/tracks", "output_format": "radar/track_report", "parameters": {}}
+            ]}
+          }
+        }
+      ],
       "period_sources": [
         {
           "path": "request.requested_track_update_interval_ms",
@@ -336,6 +513,37 @@
         "receiver_sampling_frequency_and_monitoring_architecture",
         "parameter_measurement_method"
       ],
+      "refinements": [
+        {
+          "profile_id": "wideband_channelized_psd_intercept",
+          "profile_version": "1.0",
+          "completion_scope": "wideband_interception_and_report",
+          "covered_outputs": ["intercepted_signal_observations"],
+          "directions": ["rx"],
+          "selection": {"path": "processing.profile", "equals": "wideband_channelized_psd_intercept"},
+          "conditions": {"processing.architecture": "channelized_psd"},
+          "input_kind": "wideband_rf_iq_stream",
+          "required_parameters": ["processing.input_sample_rate_mhz", "processing.input_block_length", "processing.channel_count", "processing.decimation", "processing.selected_channel", "processing.channel_sample_rate_mhz", "processing.channel_block_length", "processing.fft_length", "processing.overlap", "processing.measurement_method"],
+          "proposed_contracts": {
+            "ew/emission_measurements": "带中心频率、占用带宽、电平单位及首次/末次观测时间的辐射源参数；当前OPS未定义",
+            "ew/intercept_report": "带观测ID、测量条件和事件时间的侦收报告；当前OPS未定义"
+          },
+          "roles": {
+            "acquire_monitoring_signal": {"boundary": "source", "format": "iq/wideband"},
+            "detect_signal_activity": {"steps": [
+              {"id": "channelize", "capability": "wideband_digital_channelizer", "input_format": "iq/wideband", "output_format": "ew/channelized_iq", "parameters": {"channel_count": "processing.channel_count", "decimation": "processing.decimation", "sample_rate_mhz": "processing.input_sample_rate_mhz", "input_block_length": "processing.input_block_length"}},
+              {"id": "select_channel", "capability": "channelized_iq_channel_selection", "input_format": "ew/channelized_iq", "output_format": "iq/complex", "parameters": {"channel_index": "processing.selected_channel"}},
+              {"id": "psd", "capability": "fast_spectrum_sensing", "input_format": "iq/complex", "output_format": "spectrum/psd", "parameters": {"fft_length": "processing.fft_length", "overlap": "processing.overlap", "sample_rate_mhz": "processing.channel_sample_rate_mhz", "input_block_length": "processing.channel_block_length"}}
+            ]},
+            "measure_emission_parameters": {"steps": [
+              {"id": "measure", "capability": "emission_parameter_measurement", "input_format": "spectrum/psd", "output_format": "ew/emission_measurements", "parameters": {"method": "processing.measurement_method", "report_parameters": {"path": "report_parameters", "encoding": "json"}}}
+            ]},
+            "publish_intercept_observations": {"steps": [
+              {"id": "report", "capability": "intercept_report_generation", "input_format": "ew/emission_measurements", "output_format": "ew/intercept_report", "parameters": {}}
+            ]}
+          }
+        }
+      ],
       "period_sources": [
         {
           "path": "request.requested_full_band_revisit_ms",
@@ -380,6 +588,36 @@
       "open_questions": [
         "supported_signal_classification_method_and_reference_library",
         "captured_iq_sample_rate_and_format"
+      ],
+      "refinements": [
+        {
+          "profile_id": "iq_features_classifier",
+          "profile_version": "1.0",
+          "completion_scope": "signal_family_identification",
+          "covered_outputs": ["signal_family_classification", "confidence_score", "unknown_signal_flag"],
+          "directions": ["rx"],
+          "selection": {"path": "processing.profile", "equals": "iq_features_classifier"},
+          "input_kind": "captured_iq_snippet",
+          "required_parameters": ["processing.input_sample_rate_mhz", "processing.input_block_length", "processing.filter_cutoff", "processing.feature_set", "processing.classifier_id", "processing.model_version", "processing.unknown_class_policy"],
+          "proposed_contracts": {
+            "ew/signal_features": "带特征名称、计算方法和时间窗的特征向量；当前OPS未定义",
+            "ew/classification": "信号类别、置信度及未知类别标识；当前OPS未定义",
+            "ew/identification_report": "带观测ID、模型版本、类别集合和置信度的识别报告；当前OPS未定义"
+          },
+          "roles": {
+            "load_observed_signal": {"boundary": "source", "format": "iq/complex"},
+            "extract_signal_features": {"steps": [
+              {"id": "filter", "capability": "fir_filter", "input_format": "iq/complex", "output_format": "iq/complex", "parameters": {"cutoff": "processing.filter_cutoff", "sample_rate_mhz": "processing.input_sample_rate_mhz", "input_block_length": "processing.input_block_length", "output_block_length": "processing.input_block_length"}},
+              {"id": "features", "capability": "signal_feature_extraction", "input_format": "iq/complex", "output_format": "ew/signal_features", "parameters": {"feature_set": {"path": "processing.feature_set", "encoding": "json"}}}
+            ]},
+            "classify_signal_family": {"steps": [
+              {"id": "classify", "capability": "signal_family_classification", "input_format": "ew/signal_features", "output_format": "ew/classification", "parameters": {"classifier_id": "processing.classifier_id", "model_version": "processing.model_version", "unknown_class_policy": "processing.unknown_class_policy", "candidate_families": {"path": "candidate_signal_families", "encoding": "json"}}}
+            ]},
+            "publish_identification_result": {"steps": [
+              {"id": "report", "capability": "signal_identification_report_generation", "input_format": "ew/classification", "output_format": "ew/identification_report", "parameters": {}}
+            ]}
+          }
+        }
       ]
     }
   }

@@ -7,6 +7,11 @@
       "match_condition": "抽取或插值参数与频率配置正确；当前运行组件支持 DDC 和 DUC 两种模式。"
     },
     {
+      "cid": "C04",
+      "capabilities": ["digital_agc"],
+      "match_condition": "仅对复数IQ进行数字自动增益调整；目标幅度、更新速率和增益限制需明确，不代表硬件可变增益放大器。"
+    },
+    {
       "cid": "C05",
       "capabilities": ["fir_filter", "iir_filter"],
       "match_condition": "滤波类型、截止频率或滤波器系数齐全，且与 FIR/IIR 配置一致。"
@@ -60,6 +65,16 @@
       "cid": "C32",
       "capabilities": ["iq_delay_replay", "digital_rf_memory_replay"],
       "match_condition": "仅匹配离线 IQ 延迟与重放；需要 IQ 数据输入，不直接消费干扰控制配置。"
+    },
+    {
+      "cid": "C33",
+      "capabilities": ["rf_iq_receive_simulation"],
+      "match_condition": "仅对已经采样的复数IQ模拟接收链效应；不等于天线、LNA、混频器或ADC硬件接收。"
+    },
+    {
+      "cid": "C34",
+      "capabilities": ["rf_iq_transmit_simulation"],
+      "match_condition": "仅产生发射参考复数IQ及增益、限幅效应；不进行DAC、功放或空中发射。"
     }
   ]
 }

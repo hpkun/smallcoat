@@ -4,7 +4,8 @@ from collections.abc import Mapping
 
 from task_executor import DAGExecutor
 from matching import match_task
-from task_repr import represent_task
+from task_repr import (represent_external_task, represent_external_tasks,
+                       represent_task)
 from components.runtime import DataPacket
 from scheduler import TaskScheduler
 
@@ -27,6 +28,11 @@ class TaskService:
         task = represent_task(document)
         return {"task_id": task.task_id, "node_count": len(task.G.nodes),
                 "edge_count": len(task.G.edges)}
+
+    def represent_external(self, request: dict | list) -> dict:
+        if isinstance(request, dict) and "tasks" not in request:
+            return represent_external_task(request)
+        return represent_external_tasks(request)
 
     def match(self, document: dict) -> dict:
         task = represent_task(document)

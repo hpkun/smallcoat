@@ -512,6 +512,38 @@
       "estimated_runtime_ms": null,
       "runtime_status": "未标定（仅定义时延等级）",
       "simulation_profile": {"resource_levels": {"cpu": 1, "mem": 4, "dsp": 4, "fpga": 5, "bw": 5}, "latency_level": "L0", "sharing_class": "X", "preemption_class": "N"}
+    },
+    {
+      "cid": "C33",
+      "name": "RF Receive IQ Front-End Simulation",
+      "short_name": "RF Rx IQ Sim",
+      "function": "对已采样复数IQ模拟接收增益、噪声、限幅、频率搬移和带限滤波；不接收物理射频信号",
+      "input_formats": ["已采样复数IQ"],
+      "output_formats": ["接收处理复数IQ"],
+      "configurable_parameters": ["lo_offset_hz", "gain_db", "bandwidth_hz", "filter_taps", "clip_amplitude", "noise_std", "seed"],
+      "families": ["通用"],
+      "typical_predecessors": ["采样IQ源"],
+      "typical_successors": ["C03", "C04", "C05"],
+      "primary_resources": ["CPU"],
+      "estimated_runtime_ms": null,
+      "runtime_status": "NumPy IQ域仿真实现；未做真实射频硬件标定",
+      "simulation_profile": {"resource_levels": {"cpu": 3, "mem": 2, "dsp": 0, "fpga": 0, "bw": 4}, "latency_level": "L2", "sharing_class": "P", "preemption_class": "C"}
+    },
+    {
+      "cid": "C34",
+      "name": "RF Transmit IQ Front-End Simulation",
+      "short_name": "RF Tx IQ Sim",
+      "function": "对已生成复数IQ模拟发射带限滤波、频率搬移、增益和幅度限幅；不驱动天线或功率放大器",
+      "input_formats": ["待发复数IQ"],
+      "output_formats": ["发射参考复数IQ"],
+      "configurable_parameters": ["lo_offset_hz", "gain_db", "bandwidth_hz", "filter_taps", "clip_amplitude"],
+      "families": ["通用"],
+      "typical_predecessors": ["C03", "C14", "C20", "C32"],
+      "typical_successors": ["IQ记录器", "硬件发射适配器"],
+      "primary_resources": ["CPU"],
+      "estimated_runtime_ms": null,
+      "runtime_status": "NumPy IQ域仿真实现；未做真实射频硬件标定",
+      "simulation_profile": {"resource_levels": {"cpu": 3, "mem": 2, "dsp": 0, "fpga": 0, "bw": 4}, "latency_level": "L2", "sharing_class": "X", "preemption_class": "C"}
     }
   ]
 }

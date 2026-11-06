@@ -1,0 +1,8 @@
+# Adapted from the MGEN example event syntax for a simulated data-link workload.
+# The loopback destination is descriptive only; the simulator sends no UDP.
+0.0 LISTEN UDP 5000
+0.0 ON 1 UDP SRC 5001 DST 127.0.0.1/5000 PERIODIC [50 256]
+0.5 ON 2 UDP SRC 5002 DST 127.0.0.1/5000 PERIODIC [20 512] COUNT 8
+2.0 OFF 1
+2.0 OFF 2
+2.0 IGNORE UDP 5000

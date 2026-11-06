@@ -12,11 +12,11 @@ CATALOG_PATH = Path(__file__).resolve().parents[1] / "components" / "data" / "co
 
 
 class ComponentCatalogTests(unittest.TestCase):
-    def test_builtin_catalog_contains_all_32_components(self):
+    def test_builtin_catalog_preserves_original_32_and_adds_iq_front_ends(self):
         catalog = default_component_catalog()
-        self.assertEqual(len(catalog), 32)
+        self.assertEqual(len(catalog), 34)
         self.assertEqual([item.cid for item in catalog.components],
-                         [f"C{index:02d}" for index in range(1, 33)])
+                         [f"C{index:02d}" for index in range(1, 35)])
 
     def test_component_keeps_function_and_scheduler_calibration(self):
         component = default_component_catalog().get("C08")

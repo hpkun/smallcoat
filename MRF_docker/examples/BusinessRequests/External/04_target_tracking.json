@@ -1,0 +1,35 @@
+{
+  "schema_version": "external_rf_task.v1",
+  "task_id": "RF-RADAR-TRACK-001",
+  "family": "radar",
+  "task_type": "target_tracking",
+  "arrival_ms": 2000,
+  "priority": 9,
+  "duration_ms": 10000,
+  "direction": "tx_rx",
+  "request": {
+    "track_id": "SIM-TRACK-01",
+    "initial_estimate": {
+      "observation_time_ms": 2000,
+      "range_m": 30000,
+      "azimuth_deg": 10,
+      "radial_velocity_mps": 75
+    },
+    "requested_track_update_interval_ms": 250
+  },
+  "performance": {
+    "max_track_report_gap_ms": 500,
+    "max_range_rmse_m": 100,
+    "max_radial_velocity_rmse_mps": 10,
+    "max_unconfirmed_track_duration_ms": 1500
+  },
+  "data_input": {
+    "kind": "rf_echo_stream",
+    "stream_id": "SIM-RADAR-ECHO-TRACK-01",
+    "binding_status": "requires_generator_or_capture"
+  },
+  "expected_output": [
+    "updated_track_estimates",
+    "track_continuity_statistics"
+  ]
+}

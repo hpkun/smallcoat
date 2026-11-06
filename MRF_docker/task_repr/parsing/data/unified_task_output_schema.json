@@ -1,0 +1,433 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/schemas/rf_task_representation_v1.json",
+  "title": "机载射频五元组任务解析结果结构",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "task_id",
+    "S",
+    "Q",
+    "R",
+    "G",
+    "X"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "rf_task_representation.v1"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "S": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family",
+        "source_family",
+        "task_type",
+        "scenario",
+        "direction",
+        "base_priority",
+        "business_parameters",
+        "data_input",
+        "expected_output"
+      ],
+      "properties": {
+        "family": {
+          "enum": [
+            "CNI",
+            "Radar",
+            "EW"
+          ]
+        },
+        "source_family": {
+          "enum": [
+            "communication",
+            "radar",
+            "electronic_support"
+          ]
+        },
+        "task_type": {
+          "type": "string"
+        },
+        "scenario": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "enum": [
+            "tx",
+            "rx",
+            "tx_rx"
+          ]
+        },
+        "base_priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "business_parameters": {
+          "type": "object"
+        },
+        "data_input": {
+          "type": "object"
+        },
+        "expected_output": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "Q": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arrival_ms",
+        "duration_ms",
+        "deadline_ms",
+        "deadline_status",
+        "quality_constraints",
+        "required_properties",
+        "evaluation_conditions",
+        "periodic_requirements"
+      ],
+      "properties": {
+        "arrival_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "duration_ms": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "deadline_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "deadline_status": {
+          "enum": [
+            "not_specified",
+            "specified_absolute_time"
+          ]
+        },
+        "quality_constraints": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "metric",
+              "comparator",
+              "value",
+              "unit",
+              "scope"
+            ],
+            "properties": {
+              "metric": {
+                "type": "string"
+              },
+              "comparator": {
+                "enum": [
+                  "<=",
+                  ">=",
+                  "=="
+                ]
+              },
+              "value": {
+                "type": "number"
+              },
+              "unit": {
+                "type": "string"
+              },
+              "scope": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "required_properties": {
+          "type": "object"
+        },
+        "evaluation_conditions": {
+          "type": "object"
+        },
+        "periodic_requirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "interval_ms",
+              "role",
+              "source_field"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "interval_ms": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "role": {
+                "enum": [
+                  "traffic_pattern",
+                  "requested_service_period"
+                ]
+              },
+              "source_field": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "R": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "estimation_status",
+        "required_resources",
+        "allocation_constraints"
+      ],
+      "properties": {
+        "estimation_status": {
+          "const": "not_estimated"
+        },
+        "required_resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cpu_millicores",
+            "memory_mib",
+            "dsp_units",
+            "fpga_units",
+            "bandwidth_mbps",
+            "rf_channels",
+            "rf_bandwidth_mhz"
+          ],
+          "properties": {
+            "cpu_millicores": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "memory_mib": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "dsp_units": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "fpga_units": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "bandwidth_mbps": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "rf_channels": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "rf_bandwidth_mhz": {
+              "type": [
+                "number",
+                "null"
+              ]
+            }
+          }
+        },
+        "allocation_constraints": {
+          "type": "object"
+        }
+      }
+    },
+    "G": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "generation_status",
+        "abstraction_level",
+        "nodes",
+        "edges",
+        "unresolved_information",
+        "component_bindings"
+      ],
+      "properties": {
+        "generation_status": {
+          "const": "abstract_only_requires_refinement"
+        },
+        "abstraction_level": {
+          "const": "business_function"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "role",
+              "binding_status"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "role": {
+                "type": "string"
+              },
+              "canonical_role": {
+                "type": "string"
+              },
+              "binding_status": {
+                "const": "abstract_function_only"
+              }
+            }
+          }
+        },
+        "edges": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "target"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "target": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "unresolved_information": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "component_bindings": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
+    },
+    "X": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "observed_at_ms",
+        "progress",
+        "current_priority",
+        "remaining_deadline_ms",
+        "remaining_work",
+        "allocated_resources"
+      ],
+      "properties": {
+        "status": {
+          "const": "pending"
+        },
+        "observed_at_ms": {
+          "type": "number",
+          "minimum": 0
+        },
+        "progress": {
+          "type": "number",
+          "const": 0
+        },
+        "current_priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 10
+        },
+        "remaining_deadline_ms": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "remaining_work": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "allocated_resources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cpu_millicores",
+            "memory_mib",
+            "dsp_units",
+            "fpga_units",
+            "bandwidth_mbps",
+            "rf_channels",
+            "rf_bandwidth_mhz"
+          ],
+          "properties": {
+            "cpu_millicores": {
+              "type": "number",
+              "const": 0
+            },
+            "memory_mib": {
+              "type": "number",
+              "const": 0
+            },
+            "dsp_units": {
+              "type": "number",
+              "const": 0
+            },
+            "fpga_units": {
+              "type": "number",
+              "const": 0
+            },
+            "bandwidth_mbps": {
+              "type": "number",
+              "const": 0
+            },
+            "rf_channels": {
+              "type": "number",
+              "const": 0
+            },
+            "rf_bandwidth_mhz": {
+              "type": "number",
+              "const": 0
+            }
+          }
+        }
+      }
+    }
+  }
+}

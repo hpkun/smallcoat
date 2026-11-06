@@ -1,6 +1,7 @@
 """运行组件工厂。独立于只估算资源的 registry.py，避免混淆两类对象。"""
 
 from .common.ddc_component import DDCComponent
+from .common.agc_component import AGCComponent
 from .common.digital_filter_component import DigitalFilterComponent
 from .common.synchronizer_component import SynchronizerComponent
 from .common.fft_component import FFTComponent
@@ -12,13 +13,15 @@ from .radar.pulse_compression_component import PulseCompressionComponent
 from .radar.cfar_component import CFARComponent
 from .ew.spectrum_sensing_component import SpectrumSensingComponent
 from .ew.drfm_component import DRFMComponent
+from .rf.front_end import RFReceiveIQComponent, RFTransmitIQComponent
 
 
 RUNTIME_COMPONENT_REGISTRY = {
     cls.cid: cls for cls in (
-        DDCComponent, DigitalFilterComponent, SynchronizerComponent, FFTComponent,
+        DDCComponent, AGCComponent, DigitalFilterComponent, SynchronizerComponent, FFTComponent,
         ChannelizerComponent, PSKQAMComponent, OFDMComponent, FECComponent,
         PulseCompressionComponent, CFARComponent, SpectrumSensingComponent, DRFMComponent,
+        RFReceiveIQComponent, RFTransmitIQComponent,
     )
 }
 

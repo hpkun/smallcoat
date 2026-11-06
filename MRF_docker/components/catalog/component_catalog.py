@@ -1,4 +1,4 @@
-"""32 个软件化波形组件的机器可读目录。
+"""软件化波形组件的机器可读目录。
 
 组件库把功能接口和第一版调度仿真标定放在同一条记录中，供任务模板、组件组合
 和资源调度代码复用。这里保存的是轻量化组件契约，不包含 IQ 样本、固件二进制
@@ -167,7 +167,7 @@ def _component(value: Any, index: int) -> ComponentDefinition:
 
 
 def load_component_catalog(path: str | Path | None = None) -> ComponentCatalog:
-    """读取并严格校验组件库；不传路径时读取内置 32 组件 JSON。"""
+    """读取并严格校验组件库；不传路径时读取内置组件 JSON。"""
     catalog_path = (Path(path) if path is not None else
                     Path(__file__).resolve().parents[1] / "data" / "components.json")
     try:
@@ -181,8 +181,8 @@ def load_component_catalog(path: str | Path | None = None) -> ComponentCatalog:
         raise ValidationError("catalog.components must be a non-empty array")
     components = tuple(_component(item, index) for index, item in enumerate(root["components"]))
     catalog = ComponentCatalog(components, root["schema_version"])
-    if len(catalog) != 32:
-        raise ValidationError(f"built-in component catalog must contain 32 components, got {len(catalog)}")
+    if path is None and len(catalog) != 34:
+        raise ValidationError(f"built-in component catalog must contain 34 components, got {len(catalog)}")
     return catalog
 
 

@@ -1,0 +1,42 @@
+{
+  "schema_version": "external_rf_task.v1",
+  "task_id": "voice-tx-demo-001",
+  "family": "communication",
+  "task_type": "voice_communication",
+  "scenario": "voice_transmission",
+  "direction": "tx",
+  "arrival_ms": 0,
+  "deadline_ms": 100,
+  "duration_ms": 20,
+  "priority": 5,
+  "request": {
+    "call_mode": "one_way_voice",
+    "traffic": {
+      "payload_mib": 0.02
+    },
+    "audio_source": {
+      "kind": "pcm_buffer",
+      "reference": "demo-voice-buffer-001",
+      "format": "audio/pcm",
+      "sample_rate_hz": 16000,
+      "channels": 1
+    },
+    "communication": {
+      "data_rate_mbps": 0.064,
+      "modulation_coding": "QPSK_convolutional_rate_1_2",
+      "link_quality": 0.8
+    }
+  },
+  "performance": {},
+  "data_input": {
+    "kind": "application_audio_stream",
+    "stream_id": "demo-voice-buffer-001",
+    "binding_status": "requires_generator_or_capture",
+    "format": "audio/pcm",
+    "sample_rate_hz": 16000,
+    "channels": 1
+  },
+  "expected_output": [
+    "transmitted_voice_signal"
+  ]
+}

@@ -1,4 +1,4 @@
-"""11 个核心运行组件的统一接口和基本算法回归测试。"""
+"""运行组件的统一接口和基本算法回归测试。"""
 
 import unittest
 
@@ -17,11 +17,11 @@ def packet(samples, domain="time", sample_rate=1_000_000.0, timestamp=0.0):
 
 
 class RuntimeComponentTests(unittest.TestCase):
-    def test_registry_contains_all_twelve_runtime_components(self):
+    def test_registry_contains_all_fifteen_runtime_components(self):
         self.assertEqual(
             set(RUNTIME_COMPONENT_REGISTRY),
-            {"C03", "C05", "C07", "C08", "C09", "C14", "C15", "C17",
-             "C21", "C23", "C27", "C32"},
+            {"C03", "C04", "C05", "C07", "C08", "C09", "C14", "C15", "C17",
+             "C21", "C23", "C27", "C32", "C33", "C34"},
         )
 
     def test_ddc_mixes_a_tone_to_baseband(self):

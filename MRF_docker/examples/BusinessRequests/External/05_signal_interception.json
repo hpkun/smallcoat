@@ -1,0 +1,40 @@
+{
+  "schema_version": "external_rf_task.v1",
+  "task_id": "RF-ES-INTERCEPT-001",
+  "family": "electronic_support",
+  "task_type": "signal_interception",
+  "arrival_ms": 3000,
+  "priority": 8,
+  "duration_ms": 15000,
+  "direction": "rx",
+  "request": {
+    "monitor_frequency_range_mhz": [
+      900,
+      930
+    ],
+    "monitor_mode": "continuous_surveillance",
+    "requested_full_band_revisit_ms": 500,
+    "report_parameters": [
+      "center_frequency_mhz",
+      "occupied_bandwidth_khz",
+      "signal_level_dbfs",
+      "first_seen_ms",
+      "last_seen_ms"
+    ]
+  },
+  "performance": {
+    "max_signal_report_latency_ms": 500,
+    "reference_signal_snr_db": 6,
+    "min_detection_probability_at_reference_snr": 0.9,
+    "max_false_alarm_probability_per_analysis_window": 0.001
+  },
+  "data_input": {
+    "kind": "wideband_rf_iq_stream",
+    "stream_id": "SIM-ESM-WIDEBAND-01",
+    "binding_status": "requires_generator_or_capture"
+  },
+  "expected_output": [
+    "intercepted_signal_observations",
+    "spectrum_occupancy_statistics"
+  ]
+}

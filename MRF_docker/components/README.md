@@ -1,8 +1,10 @@
 # Waveform components
 
 This package owns the component library and the existing OPS/OCS contracts.
-The original 32 static definitions and capability mappings are preserved in
-`data/`. The 12 CPU reference implementations remain in `implementations/`.
+The original C01-C32 definitions remain in `data/`, with C33-C34 added for IQ
+front-end simulation. There are 15 CPU reference implementations, including
+the newly runnable C04 digital AGC. See [RF front-end simulation](RF_FRONTEND_SIMULATION.md)
+for research sources, behavior, and hardware boundaries.
 
 | Directory | Responsibility |
 | --- | --- |

@@ -1,0 +1,35 @@
+{
+  "schema_version": "external_rf_task.v1",
+  "task_id": "RF-COM-DATALINK-001",
+  "family": "communication",
+  "task_type": "data_link_transfer",
+  "arrival_ms": 500,
+  "priority": 8,
+  "duration_ms": 30000,
+  "direction": "tx",
+  "request": {
+    "delivery_mode": "unicast",
+    "message_category": "periodic_platform_status",
+    "destination_id": "SIM-PEER-01",
+    "traffic": {
+      "generation_model": "periodic",
+      "message_payload_bytes": 500,
+      "message_period_ms": 50,
+      "nominal_payload_rate_kbps": 80
+    }
+  },
+  "performance": {
+    "max_one_way_delivery_latency_ms": 50,
+    "min_message_delivery_ratio": 0.999,
+    "preserve_message_order": true
+  },
+  "data_input": {
+    "kind": "application_message_stream",
+    "stream_id": "SIM-DATALINK-01",
+    "binding_status": "requires_generator_or_capture"
+  },
+  "expected_output": [
+    "delivered_message_records",
+    "link_delivery_statistics"
+  ]
+}

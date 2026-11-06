@@ -1,0 +1,35 @@
+{
+  "schema_version": "external_rf_task.v1",
+  "task_id": "RF-COM-VOICE-001",
+  "family": "communication",
+  "task_type": "voice_communication",
+  "arrival_ms": 0,
+  "priority": 7,
+  "duration_ms": 30000,
+  "direction": "tx_rx",
+  "request": {
+    "call_mode": "half_duplex_push_to_talk",
+    "destination_group": "SIM-GROUP-01",
+    "participant_count": 4,
+    "traffic": {
+      "traffic_model": "on_off_speech",
+      "mean_talk_spurt_ms": 2000,
+      "mean_silence_ms": 1500,
+      "frame_interval_ms": 20,
+      "encoded_payload_bytes_per_frame": 60
+    }
+  },
+  "performance": {
+    "max_mouth_to_ear_latency_ms": 300,
+    "min_frame_delivery_ratio": 0.99
+  },
+  "data_input": {
+    "kind": "application_audio_stream",
+    "stream_id": "SIM-VOICE-01",
+    "binding_status": "requires_generator_or_capture"
+  },
+  "expected_output": [
+    "decoded_audio_frames",
+    "speech_delivery_statistics"
+  ]
+}

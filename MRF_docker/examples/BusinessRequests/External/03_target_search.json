@@ -1,0 +1,50 @@
+{
+  "schema_version": "external_rf_task.v1",
+  "task_id": "RF-RADAR-SEARCH-001",
+  "family": "radar",
+  "task_type": "target_search",
+  "arrival_ms": 1000,
+  "priority": 8,
+  "duration_ms": 10000,
+  "direction": "tx_rx",
+  "request": {
+    "search_volume": {
+      "azimuth_deg": [
+        -45,
+        45
+      ],
+      "elevation_deg": [
+        -10,
+        10
+      ],
+      "range_m": [
+        1000,
+        50000
+      ]
+    },
+    "range_resolution_requirement_m": 15,
+    "radial_velocity_span_mps": [
+      -150,
+      150
+    ],
+    "scan_revisit_interval_ms": 2000,
+    "reference_target": {
+      "radar_cross_section_dbsm": 0,
+      "range_m": 30000
+    }
+  },
+  "performance": {
+    "min_detection_probability_at_reference_target": 0.9,
+    "max_false_alarm_probability_per_resolution_cell": 1e-06,
+    "max_first_search_report_ms": 2000
+  },
+  "data_input": {
+    "kind": "rf_echo_stream",
+    "stream_id": "SIM-RADAR-ECHO-SEARCH-01",
+    "binding_status": "requires_generator_or_capture"
+  },
+  "expected_output": [
+    "target_detection_reports",
+    "search_coverage_statistics"
+  ]
+}

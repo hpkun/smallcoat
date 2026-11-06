@@ -84,7 +84,8 @@ class SpecificationTests(unittest.TestCase):
 
     def test_fft_ocs_rejects_inconsistent_mode_profiles(self):
         raw = json.loads((DATA / "ocs.json").read_text(encoding="utf-8"))
-        del raw["components"][3]["ports"]["out"]["protocols_by_mode"]["ifft"]
+        fft = next(item for item in raw["components"] if item["cid"] == "C08")
+        del fft["ports"]["out"]["protocols_by_mode"]["ifft"]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "ocs.json"
             path.write_text(json.dumps(raw), encoding="utf-8")

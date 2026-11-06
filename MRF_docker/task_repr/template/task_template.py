@@ -1,6 +1,7 @@
 """从已规范化的任务角色提取公共 DAG 骨架及可恢复的任务变体。"""
 
 from dataclasses import asdict, dataclass
+from collections.abc import Mapping
 import json
 from typing import Sequence
 
@@ -8,6 +9,7 @@ from resources.models import ExecutionProfile, Resources, SimulationProfile
 from ..models.task import (Dependency, DynamicState, FunctionGraph, FunctionNode,
                            QoS, Semantics, TaskRepresentation)
 from ..errors import ValidationError
+from .business_task import BusinessTaskTemplate, build_business_template, restore_business_task
 
 
 @dataclass(frozen=True)
@@ -85,14 +87,18 @@ def _edge_roles(edge: Dependency, nodes: dict[str, FunctionNode]) -> CommonEdge:
                       nodes[edge.target].role, edge.target_port)
 
 
-def build_template(tasks: Sequence[TaskRepresentation]) -> TaskTemplate:
-    """以唯一 role 对齐，求严格公共节点/边交集，并保存其余图结构。
+def build_template(tasks: Sequence[TaskRepresentation | Mapping]) -> TaskTemplate | BusinessTaskTemplate:
+    """提取同阶段任务的公共节点/边；外部业务图保留待细化状态。
 
-    这不是一般图的最大公共子图算法。不同任务中复用同一 role 时，
+    V2 不是一般图的最大公共子图算法。不同任务中复用同一 role 时，
     能力和端口契约必须完全一致；节点参数和执行代价则可不同。
     """
     if not tasks:
         raise ValidationError("template requires at least one task")
+    if all(isinstance(task, Mapping) for task in tasks):
+        return build_business_template(tasks)
+    if any(not isinstance(task, TaskRepresentation) for task in tasks):
+        raise ValidationError("template tasks must all use the same representation stage")
     if any(task.schema_version != 2 for task in tasks):
         raise ValidationError("template requires schema_version 2 tasks")
     if len({task.task_id for task in tasks}) != len(tasks):
@@ -155,8 +161,11 @@ def build_template(tasks: Sequence[TaskRepresentation]) -> TaskTemplate:
     return TaskTemplate(2, common_nodes, common_edges, variants)
 
 
-def restore_task(template: TaskTemplate, task_id: str) -> TaskRepresentation:
+def restore_task(template: TaskTemplate | BusinessTaskTemplate,
+                 task_id: str) -> TaskRepresentation | dict:
     """用公共骨架、任务参数及分支还原一条任务的完整功能 DAG。"""
+    if isinstance(template, BusinessTaskTemplate):
+        return restore_business_task(template, task_id)
     if task_id not in template.variants:
         raise ValidationError(f"task {task_id} is not in the template")
     variant = template.variants[task_id]

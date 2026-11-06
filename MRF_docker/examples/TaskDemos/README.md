@@ -2,6 +2,8 @@
 
 当前目录包含 9 个统一模板 v2 实例和 1 个 v1 兼容性示例。v2 实例按 CNI、Radar、EW、ISAC 分类；参数均为用于验证模板和调度流程的演示值，不能直接当作设备实测能力或验收指标。
 
+上层语音发送业务请求样例见 [`BusinessRequests/voice_transmit_request.json`](../BusinessRequests/voice_transmit_request.json)。运行 `python -m examples.voice_transmit_representation_demo` 可查看统一外部任务入口生成的抽象模板与 `S/Q/R/G/X`；也可将该 JSON POST 到 `/api/v1/task-representations/external`。此流程不执行组件匹配、音频处理或射频发送。
+
 另有 [`fft_runtime_demo.py`](fft_runtime_demo.py) 演示真实复数信号的 C08 FFT/IFFT 运行与测量，不属于任务 JSON 实例。在项目根目录执行 `python -m examples.fft_runtime_demo`，数据契约和指标分母见[运行接口说明](../../components/runtime/README.md)。
 
 [`fft_instance01.py`](fft_instance01.py) 提供命名为 `fft_instance01` 的 C08 正向 FFT 组件实例。在项目根目录运行 `python -m examples.fft_instance01`，可查看合成 IQ 信号的峰值频率、资源估计和运行时延。

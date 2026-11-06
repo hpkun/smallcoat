@@ -1,0 +1,283 @@
+{
+  "collection_version": "external_rf_tasks_collection.v1",
+  "description": "Six independent business-level RF task requests",
+  "tasks": [
+    {
+      "schema_version": "external_rf_task.v1",
+      "task_id": "RF-COM-VOICE-001",
+      "family": "communication",
+      "task_type": "voice_communication",
+      "arrival_ms": 0,
+      "priority": 7,
+      "duration_ms": 30000,
+      "direction": "tx_rx",
+      "request": {
+        "call_mode": "half_duplex_push_to_talk",
+        "destination_group": "SIM-GROUP-01",
+        "participant_count": 4,
+        "traffic": {
+          "traffic_model": "on_off_speech",
+          "mean_talk_spurt_ms": 2000,
+          "mean_silence_ms": 1500,
+          "frame_interval_ms": 20,
+          "encoded_payload_bytes_per_frame": 60
+        }
+      },
+      "performance": {
+        "max_mouth_to_ear_latency_ms": 300,
+        "min_frame_delivery_ratio": 0.99
+      },
+      "data_input": {
+        "kind": "application_audio_stream",
+        "stream_id": "SIM-VOICE-01",
+        "binding_status": "requires_generator_or_capture"
+      },
+      "expected_output": [
+        "decoded_audio_frames",
+        "speech_delivery_statistics"
+      ]
+    },
+    {
+      "schema_version": "external_rf_task.v1",
+      "task_id": "RF-COM-DATALINK-001",
+      "family": "communication",
+      "task_type": "data_link_transfer",
+      "arrival_ms": 500,
+      "priority": 8,
+      "duration_ms": 30000,
+      "direction": "tx",
+      "request": {
+        "delivery_mode": "unicast",
+        "message_category": "periodic_platform_status",
+        "destination_id": "SIM-PEER-01",
+        "traffic": {
+          "generation_model": "periodic",
+          "message_payload_bytes": 500,
+          "message_period_ms": 50,
+          "nominal_payload_rate_kbps": 80
+        }
+      },
+      "performance": {
+        "max_one_way_delivery_latency_ms": 50,
+        "min_message_delivery_ratio": 0.999,
+        "preserve_message_order": true
+      },
+      "data_input": {
+        "kind": "application_message_stream",
+        "stream_id": "SIM-DATALINK-01",
+        "binding_status": "requires_generator_or_capture"
+      },
+      "expected_output": [
+        "delivered_message_records",
+        "link_delivery_statistics"
+      ]
+    },
+    {
+      "schema_version": "external_rf_task.v1",
+      "task_id": "RF-RADAR-SEARCH-001",
+      "family": "radar",
+      "task_type": "target_search",
+      "arrival_ms": 1000,
+      "priority": 8,
+      "duration_ms": 10000,
+      "direction": "tx_rx",
+      "request": {
+        "search_volume": {
+          "azimuth_deg": [
+            -45,
+            45
+          ],
+          "elevation_deg": [
+            -10,
+            10
+          ],
+          "range_m": [
+            1000,
+            50000
+          ]
+        },
+        "range_resolution_requirement_m": 15,
+        "radial_velocity_span_mps": [
+          -150,
+          150
+        ],
+        "scan_revisit_interval_ms": 2000,
+        "reference_target": {
+          "radar_cross_section_dbsm": 0,
+          "range_m": 30000
+        }
+      },
+      "performance": {
+        "min_detection_probability_at_reference_target": 0.9,
+        "max_false_alarm_probability_per_resolution_cell": 1e-06,
+        "max_first_search_report_ms": 2000
+      },
+      "data_input": {
+        "kind": "rf_echo_stream",
+        "stream_id": "SIM-RADAR-ECHO-SEARCH-01",
+        "binding_status": "requires_generator_or_capture"
+      },
+      "expected_output": [
+        "target_detection_reports",
+        "search_coverage_statistics"
+      ]
+    },
+    {
+      "schema_version": "external_rf_task.v1",
+      "task_id": "RF-RADAR-TRACK-001",
+      "family": "radar",
+      "task_type": "target_tracking",
+      "arrival_ms": 2000,
+      "priority": 9,
+      "duration_ms": 10000,
+      "direction": "tx_rx",
+      "request": {
+        "track_id": "SIM-TRACK-01",
+        "initial_estimate": {
+          "observation_time_ms": 2000,
+          "range_m": 30000,
+          "azimuth_deg": 10,
+          "radial_velocity_mps": 75
+        },
+        "requested_track_update_interval_ms": 250
+      },
+      "performance": {
+        "max_track_report_gap_ms": 500,
+        "max_range_rmse_m": 100,
+        "max_radial_velocity_rmse_mps": 10,
+        "max_unconfirmed_track_duration_ms": 1500
+      },
+      "data_input": {
+        "kind": "rf_echo_stream",
+        "stream_id": "SIM-RADAR-ECHO-TRACK-01",
+        "binding_status": "requires_generator_or_capture"
+      },
+      "expected_output": [
+        "updated_track_estimates",
+        "track_continuity_statistics"
+      ]
+    },
+    {
+      "schema_version": "external_rf_task.v1",
+      "task_id": "RF-ES-INTERCEPT-001",
+      "family": "electronic_support",
+      "task_type": "signal_interception",
+      "arrival_ms": 3000,
+      "priority": 8,
+      "duration_ms": 15000,
+      "direction": "rx",
+      "request": {
+        "monitor_frequency_range_mhz": [
+          900,
+          930
+        ],
+        "monitor_mode": "continuous_surveillance",
+        "requested_full_band_revisit_ms": 500,
+        "report_parameters": [
+          "center_frequency_mhz",
+          "occupied_bandwidth_khz",
+          "signal_level_dbfs",
+          "first_seen_ms",
+          "last_seen_ms"
+        ]
+      },
+      "performance": {
+        "max_signal_report_latency_ms": 500,
+        "reference_signal_snr_db": 6,
+        "min_detection_probability_at_reference_snr": 0.9,
+        "max_false_alarm_probability_per_analysis_window": 0.001
+      },
+      "data_input": {
+        "kind": "wideband_rf_iq_stream",
+        "stream_id": "SIM-ESM-WIDEBAND-01",
+        "binding_status": "requires_generator_or_capture"
+      },
+      "expected_output": [
+        "intercepted_signal_observations",
+        "spectrum_occupancy_statistics"
+      ]
+    },
+    {
+      "schema_version": "external_rf_task.v1",
+      "task_id": "RF-ES-IDENTIFY-001",
+      "family": "electronic_support",
+      "task_type": "signal_identification",
+      "arrival_ms": 5000,
+      "priority": 8,
+      "duration_ms": 10000,
+      "direction": "rx",
+      "request": {
+        "observation_id": "SIM-OBS-001",
+        "observed_signal": {
+          "estimated_center_frequency_mhz": 915.2,
+          "estimated_occupied_bandwidth_khz": 200
+        },
+        "candidate_signal_families": [
+          "analog_am",
+          "analog_fm",
+          "digital_psk",
+          "digital_qam",
+          "multicarrier",
+          "unknown"
+        ],
+        "unknown_class_allowed": true
+      },
+      "performance": {
+        "max_identification_report_latency_ms": 1000,
+        "minimum_accepted_confidence": 0.85
+      },
+      "data_input": {
+        "kind": "captured_iq_snippet",
+        "stream_id": "SIM-ESM-IQ-OBS-001",
+        "binding_status": "requires_generator_or_capture"
+      },
+      "expected_output": [
+        "signal_family_classification",
+        "confidence_score",
+        "unknown_signal_flag"
+      ]
+    },
+    {
+      "schema_version": "external_rf_task.v1",
+      "task_id": "voice-tx-demo-001",
+      "family": "communication",
+      "task_type": "voice_communication",
+      "scenario": "voice_transmission",
+      "direction": "tx",
+      "arrival_ms": 0,
+      "deadline_ms": 100,
+      "duration_ms": 20,
+      "priority": 5,
+      "request": {
+        "call_mode": "one_way_voice",
+        "traffic": {
+          "payload_mib": 0.02
+        },
+        "audio_source": {
+          "kind": "pcm_buffer",
+          "reference": "demo-voice-buffer-001",
+          "format": "audio/pcm",
+          "sample_rate_hz": 16000,
+          "channels": 1
+        },
+        "communication": {
+          "data_rate_mbps": 0.064,
+          "modulation_coding": "QPSK_convolutional_rate_1_2",
+          "link_quality": 0.8
+        }
+      },
+      "performance": {},
+      "data_input": {
+        "kind": "application_audio_stream",
+        "stream_id": "demo-voice-buffer-001",
+        "binding_status": "requires_generator_or_capture",
+        "format": "audio/pcm",
+        "sample_rate_hz": 16000,
+        "channels": 1
+      },
+      "expected_output": [
+        "transmitted_voice_signal"
+      ]
+    }
+  ]
+}

@@ -1,14 +1,15 @@
-# 12 个核心组件运行接口
+# 运行组件接口
 
-C08 的真实算法位于 [`../implementations/common/fft_component.py`](../implementations/common/fft_component.py)，类名为 `FFTComponent(RuntimeComponent)`。它按照初始化、参数校验、动态配置、`_execute()`、`process()`、`push()` 六部分组织，是 12 个运行组件共用接口的参考模板。其余 11 个组件位于 `implementations/common/`、`cni/`、`radar/` 和 `ew/` 子目录，并通过 `runtime_registry.py` 统一创建。公共框架负责计时和统计，算法部分调用 NumPy 在 CPU 上执行。
+C08 的真实算法位于 [`../implementations/common/fft_component.py`](../implementations/common/fft_component.py)，类名为 `FFTComponent(RuntimeComponent)`。它按照初始化、参数校验、动态配置、`_execute()`、`process()`、`push()` 六部分组织，是运行组件共用接口的参考模板。组件位于 `implementations/common/`、`cni/`、`radar/`、`ew/` 和 `rf/` 子目录，并通过 `runtime_registry.py` 统一创建。公共框架负责计时和统计，算法部分调用 NumPy 在 CPU 上执行。
 
-`../../resources/estimators/fft.py` 中的 `FFTModel` 负责工作量与资源估算。`ResourceEstimator` 的注册表继续指向 `FFTModel`；执行真实数据时显式创建 `FFTComponent`。运行指标暂不自动转换成 CPU、DSP、FPGA 占用，也不改写 32 个组件的仿真等级。
+`../../resources/estimators/fft.py` 中的 `FFTModel` 负责工作量与资源估算。`ResourceEstimator` 的注册表继续指向 `FFTModel`；执行真实数据时显式创建 `FFTComponent`。运行指标暂不自动转换成 CPU、DSP、FPGA 占用，也不改写组件目录的仿真等级。
 
 ## 运行组件清单
 
 | CID | 类名 | 参考算法范围 |
 | --- | --- | --- |
 | C03 | `DDCComponent` | NCO 混频、FIR、抽取/插值 |
+| C04 | `AGCComponent` | 复数 IQ 数字自动增益控制 |
 | C05 | `DigitalFilterComponent` | FIR/IIR、低通/高通/带通/带阻、跨块状态 |
 | C07 | `SynchronizerComponent` | 已知前导相关、定时偏移和频偏校正 |
 | C08 | `FFTComponent` | FFT/IFFT、窗函数、shift、批处理和重叠分帧 |
@@ -20,8 +21,10 @@ C08 的真实算法位于 [`../implementations/common/fft_component.py`](../impl
 | C23 | `CFARComponent` | 一维/二维 CA-CFAR 检测 |
 | C27 | `SpectrumSensingComponent` | FFT PSD、Welch/滑动平均和活动频段检测 |
 | C32 | `DRFMComponent` | IQ 缓存、延迟、幅相/频移变换和离线重放 |
+| C33 | `RFReceiveIQComponent` | 已采样 IQ 的接收增益、噪声、限幅、频移、带限仿真 |
+| C34 | `RFTransmitIQComponent` | 发射参考 IQ 的带限、频移、增益和限幅仿真 |
 
-这些组件是可运行的 NumPy CPU 参考实现，不是硬件驱动、FPGA bitstream 或实时射频闭环。C17 当前用卷积码验证编码/译码链路，C23 当前用 CA-CFAR 验证检测链路，C32 限定为离线/闭环 DRFM 仿真。后续接入硬件时，应在同一 `DataPacket` 和运行指标契约下替换算法后端，并用实测数据重新标定资源需求。
+这些组件是可运行的 NumPy CPU 参考实现，不是硬件驱动、FPGA bitstream 或实时射频闭环。C17 当前用卷积码验证编码/译码链路，C23 当前用 CA-CFAR 验证检测链路，C32 限定为离线/闭环 DRFM 仿真。C33/C34 的限制和参数约定见[射频前端仿真说明](../RF_FRONTEND_SIMULATION.md)。后续接入硬件时，应在同一 `DataPacket` 和运行指标契约下替换算法后端，并用实测数据重新标定资源需求。
 
 ## 统一调用方式
 

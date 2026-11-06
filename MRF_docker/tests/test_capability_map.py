@@ -9,7 +9,7 @@ from components.implementations.runtime_registry import RUNTIME_COMPONENT_REGIST
 
 
 class CapabilityMapTests(unittest.TestCase):
-    def test_builtin_map_covers_the_twelve_runtime_components(self):
+    def test_builtin_map_covers_runtime_components(self):
         mapping = default_capability_map()
         self.assertEqual({entry.cid for entry in mapping.mappings},
                          set(RUNTIME_COMPONENT_REGISTRY))

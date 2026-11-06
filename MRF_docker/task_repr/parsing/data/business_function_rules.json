@@ -1,0 +1,321 @@
+{
+  "schema_version": "rf_business_function_rules.v1",
+  "description": "业务级功能依赖规则：不引用具体组件CID，不假定调制体制、算法、处理器性能或端口契约。仅用于形成待细化的抽象功能DAG。",
+  "task_types": {
+    "voice_communication": {
+      "family": "communication",
+      "canonical_family": "CNI",
+      "valid_directions": [
+        "tx",
+        "rx",
+        "tx_rx"
+      ],
+      "required_request_fields": [
+        "call_mode",
+        "traffic"
+      ],
+      "shared_roles": {
+        "accept_voice_service_data": "accept_outbound_service_data",
+        "prepare_voice_payload": "prepare_outbound_payload",
+        "send_voice_over_radio": "send_outbound_radio_payload"
+      },
+      "branches": {
+        "tx": [
+          "accept_voice_service_data",
+          "prepare_voice_payload",
+          "send_voice_over_radio"
+        ],
+        "rx": [
+          "receive_voice_radio_signal",
+          "recover_voice_payload",
+          "deliver_voice_service_data"
+        ]
+      },
+      "quality_fields": {
+        "max_mouth_to_ear_latency_ms": {
+          "metric": "mouth_to_ear_latency",
+          "comparator": "<=",
+          "unit": "ms",
+          "scope": "end_to_end"
+        },
+        "min_frame_delivery_ratio": {
+          "metric": "frame_delivery_ratio",
+          "comparator": ">=",
+          "unit": "ratio",
+          "scope": "voice_frames"
+        }
+      },
+      "open_questions": [
+        "voice_codec_and_payload_format",
+        "air_interface_waveform_and_coding"
+      ],
+      "period_sources": [
+        {
+          "path": "request.traffic.frame_interval_ms",
+          "kind": "voice_frame_interval",
+          "role": "traffic_pattern"
+        }
+      ]
+    },
+    "data_link_transfer": {
+      "family": "communication",
+      "canonical_family": "CNI",
+      "valid_directions": [
+        "tx",
+        "rx",
+        "tx_rx"
+      ],
+      "required_request_fields": [
+        "delivery_mode",
+        "traffic"
+      ],
+      "shared_roles": {
+        "accept_data_link_messages": "accept_outbound_service_data",
+        "prepare_data_link_frames": "prepare_outbound_payload",
+        "transmit_data_link_frames": "send_outbound_radio_payload"
+      },
+      "branches": {
+        "tx": [
+          "accept_data_link_messages",
+          "prepare_data_link_frames",
+          "transmit_data_link_frames"
+        ],
+        "rx": [
+          "receive_data_link_frames",
+          "recover_data_link_messages",
+          "deliver_data_link_messages"
+        ]
+      },
+      "quality_fields": {
+        "max_one_way_delivery_latency_ms": {
+          "metric": "one_way_delivery_latency",
+          "comparator": "<=",
+          "unit": "ms",
+          "scope": "message"
+        },
+        "min_message_delivery_ratio": {
+          "metric": "message_delivery_ratio",
+          "comparator": ">=",
+          "unit": "ratio",
+          "scope": "message"
+        },
+        "preserve_message_order": {
+          "property": "preserve_message_order"
+        }
+      },
+      "open_questions": [
+        "data_link_protocol_and_waveform_profile",
+        "channel_coding_and_frame_contract"
+      ],
+      "period_sources": [
+        {
+          "path": "request.traffic.message_period_ms",
+          "kind": "message_generation",
+          "role": "traffic_pattern"
+        }
+      ]
+    },
+    "target_search": {
+      "family": "radar",
+      "canonical_family": "Radar",
+      "valid_directions": [
+        "tx_rx",
+        "rx"
+      ],
+      "required_request_fields": [
+        "search_volume",
+        "range_resolution_requirement_m",
+        "scan_revisit_interval_ms"
+      ],
+      "branches": {
+        "main": [
+          "collect_search_observations",
+          "detect_candidate_targets",
+          "produce_search_report"
+        ]
+      },
+      "quality_fields": {
+        "min_detection_probability_at_reference_target": {
+          "metric": "detection_probability",
+          "comparator": ">=",
+          "unit": "ratio",
+          "scope": "at_reference_target"
+        },
+        "max_false_alarm_probability_per_resolution_cell": {
+          "metric": "false_alarm_probability",
+          "comparator": "<=",
+          "unit": "ratio",
+          "scope": "per_resolution_cell"
+        },
+        "max_first_search_report_ms": {
+          "metric": "first_search_report_latency",
+          "comparator": "<=",
+          "unit": "ms",
+          "scope": "first_report"
+        }
+      },
+      "open_questions": [
+        "radar_waveform_and_detection_processing_chain",
+        "receive_sampling_and_frontend_configuration"
+      ],
+      "period_sources": [
+        {
+          "path": "request.scan_revisit_interval_ms",
+          "kind": "search_revisit",
+          "role": "requested_service_period"
+        }
+      ]
+    },
+    "target_tracking": {
+      "family": "radar",
+      "canonical_family": "Radar",
+      "valid_directions": [
+        "tx_rx",
+        "rx"
+      ],
+      "required_request_fields": [
+        "track_id",
+        "initial_estimate",
+        "requested_track_update_interval_ms"
+      ],
+      "branches": {
+        "main": [
+          "collect_tracking_observations",
+          "derive_target_measurements",
+          "associate_measurements_to_track",
+          "update_target_state_estimate",
+          "publish_track_report"
+        ]
+      },
+      "quality_fields": {
+        "max_track_report_gap_ms": {
+          "metric": "track_report_gap",
+          "comparator": "<=",
+          "unit": "ms",
+          "scope": "track"
+        },
+        "max_range_rmse_m": {
+          "metric": "range_rmse",
+          "comparator": "<=",
+          "unit": "m",
+          "scope": "track"
+        },
+        "max_radial_velocity_rmse_mps": {
+          "metric": "radial_velocity_rmse",
+          "comparator": "<=",
+          "unit": "m/s",
+          "scope": "track"
+        },
+        "max_unconfirmed_track_duration_ms": {
+          "metric": "unconfirmed_track_duration",
+          "comparator": "<=",
+          "unit": "ms",
+          "scope": "track"
+        }
+      },
+      "open_questions": [
+        "tracking_measurement_interface_and_data_association_method",
+        "radar_waveform_if_new_echo_acquisition_required"
+      ],
+      "period_sources": [
+        {
+          "path": "request.requested_track_update_interval_ms",
+          "kind": "track_update",
+          "role": "requested_service_period"
+        }
+      ]
+    },
+    "signal_interception": {
+      "family": "electronic_support",
+      "canonical_family": "EW",
+      "valid_directions": [
+        "rx"
+      ],
+      "required_request_fields": [
+        "monitor_frequency_range_mhz",
+        "monitor_mode",
+        "report_parameters"
+      ],
+      "branches": {
+        "main": [
+          "acquire_monitoring_signal",
+          "detect_signal_activity",
+          "measure_emission_parameters",
+          "publish_intercept_observations"
+        ]
+      },
+      "quality_fields": {
+        "max_signal_report_latency_ms": {
+          "metric": "signal_report_latency",
+          "comparator": "<=",
+          "unit": "ms",
+          "scope": "intercept_report"
+        },
+        "min_detection_probability_at_reference_snr": {
+          "metric": "detection_probability",
+          "comparator": ">=",
+          "unit": "ratio",
+          "scope": "at_reference_snr"
+        },
+        "max_false_alarm_probability_per_analysis_window": {
+          "metric": "false_alarm_probability",
+          "comparator": "<=",
+          "unit": "ratio",
+          "scope": "per_analysis_window"
+        },
+        "reference_signal_snr_db": {
+          "context": "reference_signal_snr_db"
+        }
+      },
+      "open_questions": [
+        "receiver_sampling_frequency_and_monitoring_architecture",
+        "parameter_measurement_method"
+      ],
+      "period_sources": [
+        {
+          "path": "request.requested_full_band_revisit_ms",
+          "kind": "full_band_revisit",
+          "role": "requested_service_period"
+        }
+      ]
+    },
+    "signal_identification": {
+      "family": "electronic_support",
+      "canonical_family": "EW",
+      "valid_directions": [
+        "rx"
+      ],
+      "required_request_fields": [
+        "observation_id",
+        "candidate_signal_families",
+        "unknown_class_allowed"
+      ],
+      "branches": {
+        "main": [
+          "load_observed_signal",
+          "extract_signal_features",
+          "classify_signal_family",
+          "publish_identification_result"
+        ]
+      },
+      "quality_fields": {
+        "max_identification_report_latency_ms": {
+          "metric": "identification_report_latency",
+          "comparator": "<=",
+          "unit": "ms",
+          "scope": "identification_report"
+        },
+        "minimum_accepted_confidence": {
+          "metric": "accepted_classification_confidence_threshold",
+          "comparator": ">=",
+          "unit": "ratio",
+          "scope": "per_accepted_prediction"
+        }
+      },
+      "open_questions": [
+        "supported_signal_classification_method_and_reference_library",
+        "captured_iq_sample_rate_and_format"
+      ]
+    }
+  }
+}

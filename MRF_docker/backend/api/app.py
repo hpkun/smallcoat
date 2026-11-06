@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Body, FastAPI
 from fastapi.responses import JSONResponse
 
 from task_repr import ValidationError
@@ -48,6 +48,10 @@ def create_app(task_service: TaskService | None = None,
     @app.post("/api/v1/tasks/validate")
     def validate_task(document: dict):
         return task_service.validate(document)
+
+    @app.post("/api/v1/task-representations/external")
+    def represent_external(request: dict | list = Body(...)):
+        return task_service.represent_external(request)
 
     @app.get("/api/v1/tasks/{name}")
     def get_task(name: str):

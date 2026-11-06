@@ -1,0 +1,63 @@
+{
+  "schema_version": "rf_task_representation.v1",
+  "task_id": null,
+  "S": {
+    "family": null,
+    "source_family": null,
+    "task_type": null,
+    "scenario": null,
+    "direction": null,
+    "base_priority": null,
+    "business_parameters": {},
+    "data_input": {},
+    "expected_output": []
+  },
+  "Q": {
+    "arrival_ms": null,
+    "duration_ms": null,
+    "deadline_ms": null,
+    "deadline_status": "not_specified",
+    "quality_constraints": [],
+    "required_properties": {},
+    "evaluation_conditions": {},
+    "periodic_requirements": []
+  },
+  "R": {
+    "estimation_status": "not_estimated",
+    "required_resources": {
+      "cpu_millicores": null,
+      "memory_mib": null,
+      "dsp_units": null,
+      "fpga_units": null,
+      "bandwidth_mbps": null,
+      "rf_channels": null,
+      "rf_bandwidth_mhz": null
+    },
+    "allocation_constraints": {}
+  },
+  "G": {
+    "generation_status": "pending",
+    "abstraction_level": "business_function",
+    "nodes": [],
+    "edges": [],
+    "unresolved_information": [],
+    "component_bindings": []
+  },
+  "X": {
+    "status": "pending",
+    "observed_at_ms": null,
+    "progress": 0,
+    "current_priority": null,
+    "remaining_deadline_ms": null,
+    "remaining_work": null,
+    "allocated_resources": {
+      "cpu_millicores": 0,
+      "memory_mib": 0,
+      "dsp_units": 0,
+      "fpga_units": 0,
+      "bandwidth_mbps": 0,
+      "rf_channels": 0,
+      "rf_bandwidth_mhz": 0
+    }
+  }
+}

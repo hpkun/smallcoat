@@ -66,6 +66,8 @@ class StaticMatchResult:
     edges: tuple[tuple[str, str], ...]
     unresolved: tuple[MatchIssue, ...]
     refined_graph: dict | None = None
+    candidate_bindings: tuple[dict[str, ComponentBinding], ...] = ()
+    candidates_exhaustive: bool = True
 
     def to_dict(self) -> dict:
         result = {"task_id": self.task_id, "status": self.status,
@@ -75,6 +77,11 @@ class StaticMatchResult:
         if self.refined_graph is not None:
             result["refined_graph"] = self.refined_graph
             result["match_scope"] = "component_dag"
+        if self.candidate_bindings:
+            result["candidate_bindings"] = [
+                {key: value.to_dict() for key, value in option.items()}
+                for option in self.candidate_bindings]
+            result["candidates_exhaustive"] = self.candidates_exhaustive
         return result
 
 
@@ -165,8 +172,11 @@ def _load_task(task):
     raise TypeError("task must be a TaskRepresentation, JSON path or task mapping")
 
 
-def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatchResult:
+def match_task(task, capability_map: CapabilityMap | None = None,
+               *, max_solutions: int = 1) -> StaticMatchResult:
     """筛选可运行组件并校验 DAG 连接，返回绑定及未解决的问题。"""
+    if type(max_solutions) is not int or max_solutions < 1:
+        raise ValueError("max_solutions must be a positive integer")
     task = _load_task(task)
     refined_graph = None
     if isinstance(task, RefinementResult):
@@ -219,24 +229,48 @@ def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatch
         if not feasible:
             node_issues.extend(failures)
 
-    # 同一能力可能有多个候选实现；遍历组合并保留边冲突最少的方案。
-    # 若找到所有边均可连接的组合，即可提前结束。
+    # 节点组合形成过程中，一旦两端都已选定就检查边，及时剪掉不可连接的分支。
     active = [node.node_id for node in task.G.nodes if options[node.node_id]]
-    chosen = {}
     best = None
     best_issues = None
-    for combination in itertools.product(*(options[node_id] for node_id in active)):
-        trial = dict(zip(active, combination))
-        edge_issues = [_edge_issue(task, edge, trial.get(edge.source), trial.get(edge.target), nodes)
-                       for edge in task.G.edges]
-        edge_issues = [issue for issue in edge_issues if issue is not None]
-        if best is None or len(edge_issues) < len(best_issues):
-            best, best_issues = trial, edge_issues
-        if not edge_issues:
-            break
+    solutions = []
+    candidates_exhaustive = True
+
+    def valid_trials(index, trial):
+        if index == len(active):
+            if len(trial) == len(nodes):
+                yield dict(trial)
+            return
+        node_id = active[index]
+        for candidate in options[node_id]:
+            trial[node_id] = candidate
+            if all(_edge_issue(task, edge, trial[edge.source], trial[edge.target], nodes) is None
+                   for edge in task.G.edges
+                   if edge.source in trial and edge.target in trial):
+                yield from valid_trials(index + 1, trial)
+            del trial[node_id]
+
+    if not node_issues:
+        for trial in valid_trials(0, {}):
+            if len(solutions) == max_solutions:
+                candidates_exhaustive = False
+                break
+            solutions.append({node_id: candidate.binding for node_id, candidate in trial.items()})
+            if best is None:
+                best, best_issues = trial, []
+            if max_solutions == 1:
+                break
+    if best is None:
+        for combination in itertools.product(*(options[node_id] for node_id in active)):
+            trial = dict(zip(active, combination))
+            edge_issues = [_edge_issue(task, edge, trial.get(edge.source), trial.get(edge.target), nodes)
+                           for edge in task.G.edges]
+            edge_issues = [issue for issue in edge_issues if issue is not None]
+            if best is None or len(edge_issues) < len(best_issues):
+                best, best_issues = trial, edge_issues
+        if best_issues is None:
+            best_issues = [_edge_issue(task, edge, None, None, nodes) for edge in task.G.edges]
     chosen = best or {}
-    if best_issues is None:
-        best_issues = [_edge_issue(task, edge, None, None, nodes) for edge in task.G.edges]
     output_issues = []
     if isinstance(task, SpecificationTask):
         output_issues = [MatchIssue("OUTPUT_NOT_COVERED", f"refinement profile does not produce {name}")
@@ -250,4 +284,6 @@ def match_task(task, capability_map: CapabilityMap | None = None) -> StaticMatch
     # 有候选但仍有节点或边问题时标记 PARTIAL；完全无候选时标记 UNSUPPORTED。
     status = ("MATCHED" if not issues and len(bindings) == len(nodes) else
               "PARTIAL" if any_candidate else "UNSUPPORTED")
-    return StaticMatchResult(task.task_id, status, bindings, edges, issues, refined_graph)
+    return StaticMatchResult(task.task_id, status, bindings, edges, issues, refined_graph,
+                             tuple(solutions) if max_solutions > 1 and status == "MATCHED" else (),
+                             candidates_exhaustive)

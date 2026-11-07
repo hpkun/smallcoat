@@ -5,8 +5,9 @@ from collections.abc import Mapping
 from task_executor import DAGExecutor
 from matching import match_task
 from task_repr import (represent_external_task, represent_external_tasks,
-                       represent_task)
+                       parse_external_task, refine_business_task, represent_task)
 from components.runtime import DataPacket
+from resources.planner import ResourceUsage
 from scheduler import TaskScheduler
 
 from ..repositories import JsonDocumentRepository
@@ -38,6 +39,18 @@ class TaskService:
         return match_task(document).to_dict()
 
     def plan(self, document: dict) -> dict:
+        if document.get("schema_version") in ("external_rf_task.v1", "rf_task_representation.v1"):
+            normalized = (parse_external_task(document)
+                          if document["schema_version"] == "external_rf_task.v1" else document)
+            refinement = refine_business_task(normalized)
+            match = match_task(refinement)
+            if refinement.task is None or match.status != "MATCHED":
+                return {"task_id": refinement.task_id, "status": "UNMATCHED",
+                        "match": match.to_dict()}
+            used = ResourceUsage(**self.scheduler.snapshot()["used"])
+            plan = self.scheduler.planner.plan(refinement.task, match,
+                                               self.scheduler.capacity, used)
+            return plan.to_dict()
         task = represent_task(document)
         match = match_task(task)
         if match.status != "MATCHED":
